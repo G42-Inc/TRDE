@@ -3,6 +3,7 @@
 import { useEffect, useState, useId } from 'react';
 import { ModalDialog } from '@/components/ModalDialog';
 import { useAppData } from '@/hooks/useAppData';
+import { calculateHourlyPerformance, calculateStreaks, filterPerformanceTrades } from '@/lib/trades/performance';
 import { calculateAllMetrics, METRIC_EXPLAINERS } from '@trde/core';
 import type { Trade } from '@trde/core';
 import { MetricCard } from '@/components/MetricCard';
@@ -11,7 +12,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { Outcome } from '@trde/core';
 import Link from 'next/link';
 import { InformationCircleIcon, ChartBarIcon, XMarkIcon } from '@heroicons/react/24/outline';
-import { format, parseISO, subDays } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { useTheme } from '@/contexts/ThemeContext';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
 
@@ -83,22 +84,9 @@ export default function AnalyticsPage() {
 
   const edgeCollection = collections.find((c) => c.name === 'EDGE');
 
-  // Filter trades based on date range and EDGE toggle
-  let filteredTrades = dateRange === 'all' 
-    ? trades 
-    : trades.filter(t => {
-        const tradeDate = parseISO(t.tradeDate);
-        const cutoffDate = subDays(new Date(), parseInt(dateRange));
-        return tradeDate >= cutoffDate;
-      });
-
-  // Filter for EDGE trades if toggle is on
-  if (showEdgeStats) {
-    filteredTrades = filteredTrades.filter((t) => 
-      (edgeCollection && t.collections.includes(edgeCollection.id)) ||
-      t.notes?.startsWith('[EDGE')
-    );
-  }
+  const filteredTrades = filterPerformanceTrades(
+    trades, dateRange === 'all' ? null : Number(dateRange), showEdgeStats, edgeCollection?.id,
+  );
 
   const metrics = calculateAllMetrics(filteredTrades);
 
@@ -124,10 +112,10 @@ export default function AnalyticsPage() {
           break;
       }
       
-      timeframeFilteredTrades = filteredTrades.filter(t => parseISO(t.tradeDate) >= cutoffDate);
+      timeframeFilteredTrades = filteredTrades.filter(t => t.entryTime >= cutoffDate.getTime());
     }
     
-    const sortedTrades = timeframeFilteredTrades.sort((a, b) => parseISO(a.tradeDate).getTime() - parseISO(b.tradeDate).getTime());
+    const sortedTrades = [...timeframeFilteredTrades].sort((a, b) => a.entryTime - b.entryTime);
     
     switch (selectedChart) {
       case 'rollingExpectancy': {
@@ -301,7 +289,7 @@ export default function AnalyticsPage() {
 
   // Generate time-series data for each metric
   const generateTimeSeriesData = (metricKey: string): MetricChartData[] => {
-    const sortedTrades = [...filteredTrades].sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
+    const sortedTrades = [...filteredTrades].sort((a, b) => a.entryTime - b.entryTime);
     const data: MetricChartData[] = [];
     
     for (let i = 1; i <= sortedTrades.length; i++) {
@@ -409,7 +397,7 @@ export default function AnalyticsPage() {
 
   // Calculate equity curve data with moving average (both R and USD)
   const equityCurveData = (() => {
-    const sortedTrades = filteredTrades.sort((a, b) => parseISO(a.tradeDate).getTime() - parseISO(b.tradeDate).getTime());
+    const sortedTrades = [...filteredTrades].sort((a, b) => a.entryTime - b.entryTime);
     
     // Filter trades based on timeframe if date view is selected
     let timeframeFilteredTrades = sortedTrades;
@@ -434,7 +422,7 @@ export default function AnalyticsPage() {
       }
       
       if (dateTimeframe !== 'all') {
-        timeframeFilteredTrades = sortedTrades.filter(t => parseISO(t.tradeDate) >= cutoffDate);
+        timeframeFilteredTrades = sortedTrades.filter(t => t.entryTime >= cutoffDate.getTime());
       }
     }
     
@@ -531,7 +519,7 @@ export default function AnalyticsPage() {
 
   const dayOfWeekData = Object.entries(metrics.dayOfWeekPerformance).map(([day, data]) => ({
     day: day.slice(0, 3),
-    pnl: data.pnl,
+    pnl: data.r,
     count: data.count,
   }));
 
@@ -540,29 +528,11 @@ export default function AnalyticsPage() {
     if (filteredTrades.length === 0) return null;
     
     const sortedTrades = [...filteredTrades].sort((a, b) => 
-      parseISO(a.tradeDate).getTime() - parseISO(b.tradeDate).getTime()
+      a.entryTime - b.entryTime
     );
     
-    // Streak Analysis
-    let currentWinStreak = 0;
-    let currentLossStreak = 0;
-    let maxWinStreak = 0;
-    let maxLossStreak = 0;
-    let streakHistory: { trade: number; winStreak: number; lossStreak: number }[] = [];
-    
-    sortedTrades.forEach((trade, idx) => {
-      if (trade.outcome === Outcome.WIN) {
-        currentWinStreak++;
-        currentLossStreak = 0;
-        maxWinStreak = Math.max(maxWinStreak, currentWinStreak);
-      } else {
-        currentLossStreak++;
-        currentWinStreak = 0;
-        maxLossStreak = Math.max(maxLossStreak, currentLossStreak);
-      }
-      streakHistory.push({ trade: idx + 1, winStreak: currentWinStreak, lossStreak: -currentLossStreak });
-    });
-    
+    const { maxWinStreak, maxLossStreak, streakHistory, avgConsecutiveWins, avgConsecutiveLosses } = calculateStreaks(sortedTrades);
+
     // Monthly Performance
     const monthlyPerf = new Map<string, { pnl: number; r: number; wins: number; losses: number; trades: number }>();
     sortedTrades.forEach(trade => {
@@ -572,7 +542,7 @@ export default function AnalyticsPage() {
       existing.r += trade.resultR;
       existing.trades++;
       if (trade.outcome === Outcome.WIN) existing.wins++;
-      else existing.losses++;
+      else if (trade.outcome === Outcome.LOSS) existing.losses++;
       monthlyPerf.set(month, existing);
     });
     
@@ -586,30 +556,8 @@ export default function AnalyticsPage() {
       losses: data.losses,
     }));
     
-    // Hourly Performance (by entry hour)
-    const hourlyPerf = new Map<number, { pnl: number; r: number; count: number; wins: number }>();
-    sortedTrades.forEach(trade => {
-      const hour = parseISO(trade.tradeDate).getHours();
-      const existing = hourlyPerf.get(hour) || { pnl: 0, r: 0, count: 0, wins: 0 };
-      existing.pnl += trade.resultUsd;
-      existing.r += trade.resultR;
-      existing.count++;
-      if (trade.outcome === Outcome.WIN) existing.wins++;
-      hourlyPerf.set(hour, existing);
-    });
-    
-    const hourlyData = Array.from({ length: 24 }, (_, hour) => {
-      const data = hourlyPerf.get(hour) || { pnl: 0, r: 0, count: 0, wins: 0 };
-      return {
-        hour: `${hour.toString().padStart(2, '0')}:00`,
-        hourNum: hour,
-        pnl: Number(data.pnl.toFixed(2)),
-        r: Number(data.r.toFixed(2)),
-        count: data.count,
-        winRate: data.count > 0 ? Number(((data.wins / data.count) * 100).toFixed(1)) : 0,
-      };
-    }).filter(d => d.count > 0);
-    
+    const hourlyData = calculateHourlyPerformance(sortedTrades);
+
     // Drawdown Analysis
     let peak = 0;
     let drawdownData: { trade: number; equity: number; drawdown: number; drawdownPct: number }[] = [];
@@ -656,34 +604,12 @@ export default function AnalyticsPage() {
         if (absR < 1) { winsBySize.small += trade.resultR; winsBySize.smallCount++; }
         else if (absR < 2) { winsBySize.medium += trade.resultR; winsBySize.mediumCount++; }
         else { winsBySize.large += trade.resultR; winsBySize.largeCount++; }
-      } else {
+      } else if (trade.outcome === Outcome.LOSS) {
         if (absR < 1) { lossesBySize.small += trade.resultR; lossesBySize.smallCount++; }
         else if (absR < 2) { lossesBySize.medium += trade.resultR; lossesBySize.mediumCount++; }
         else { lossesBySize.large += trade.resultR; lossesBySize.largeCount++; }
       }
     });
-    
-    // Consecutive analysis
-    let consecutiveWins: number[] = [];
-    let consecutiveLosses: number[] = [];
-    let tempWin = 0, tempLoss = 0;
-    
-    sortedTrades.forEach(trade => {
-      if (trade.outcome === Outcome.WIN) {
-        tempWin++;
-        if (tempLoss > 0) { consecutiveLosses.push(tempLoss); tempLoss = 0; }
-      } else {
-        tempLoss++;
-        if (tempWin > 0) { consecutiveWins.push(tempWin); tempWin = 0; }
-      }
-    });
-    if (tempWin > 0) consecutiveWins.push(tempWin);
-    if (tempLoss > 0) consecutiveLosses.push(tempLoss);
-    
-    const avgConsecutiveWins = consecutiveWins.length > 0 
-      ? consecutiveWins.reduce((a, b) => a + b, 0) / consecutiveWins.length : 0;
-    const avgConsecutiveLosses = consecutiveLosses.length > 0 
-      ? consecutiveLosses.reduce((a, b) => a + b, 0) / consecutiveLosses.length : 0;
     
     // Profit/Loss ratio over time
     const plRatioOverTime = sortedTrades.map((_, idx) => {
@@ -1091,7 +1017,7 @@ export default function AnalyticsPage() {
                   R
                 </span>
                 <button
-                  onClick={() => setEquityView(equityView === 'R' ? 'USD' : 'R')}
+                  aria-label="Show equity in dollars" role="switch" aria-checked={equityView === 'USD'} onClick={() => setEquityView(equityView === 'R' ? 'USD' : 'R')}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-black ${
                     equityView === 'USD' ? 'bg-accent' : 'theme-bg-tertiary'
                   }`}
@@ -1900,7 +1826,7 @@ function MetricCardWithChart({
                 ? 'text-accent bg-accent/10' 
                 : 'theme-text-secondary hover:theme-text'
             }`}
-            title="Toggle chart"
+            aria-label={`Toggle ${label} chart`} title="Toggle chart"
           >
             <ChartBarIcon className="h-4 w-4" />
           </button>
@@ -1912,7 +1838,7 @@ function MetricCardWithChart({
                 setShowInfoModal(true);
               }}
               className="text-accent hover:text-accent dark:hover:text-accent-light transition-colors"
-              title="Info"
+              aria-label={`About ${label}`} title="Info"
             >
               <InformationCircleIcon className="h-4 w-4" />
             </button>

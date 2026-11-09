@@ -69,7 +69,7 @@ export function calculateMaxDrawdownUsd(trades: Trade[]): number {
   let peak = 0;
   let maxDD = 0;
   let running = 0;
-  for (const trade of trades.sort((a, b) => a.tradeDate.localeCompare(b.tradeDate))) {
+  for (const trade of [...trades].sort((a, b) => a.entryTime - b.entryTime)) {
     running += trade.resultUsd;
     if (running > peak) peak = running;
     const dd = peak - running;
@@ -82,7 +82,7 @@ export function calculateMaxDrawdownR(trades: Trade[]): number {
   let peak = 0;
   let maxDD = 0;
   let running = 0;
-  for (const trade of trades.sort((a, b) => a.tradeDate.localeCompare(b.tradeDate))) {
+  for (const trade of [...trades].sort((a, b) => a.entryTime - b.entryTime)) {
     running += trade.resultR;
     if (running > peak) peak = running;
     const dd = peak - running;
@@ -129,7 +129,7 @@ export function calculateMistakeTaxByType(trades: Trade[]): Record<MistakeTag, n
 }
 
 export function calculateRollingExpectancy(trades: Trade[], window: number = 20): number[] {
-  const sorted = [...trades].sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
+  const sorted = [...trades].sort((a, b) => a.entryTime - b.entryTime);
   const result: number[] = [];
   for (let i = 0; i < sorted.length; i++) {
     const start = Math.max(0, i - window + 1);
@@ -165,7 +165,8 @@ export function calculateDayOfWeekPerformance(trades: Trade[]): Record<string, {
     result[day] = { count: 0, pnl: 0, r: 0 };
   }
   for (const trade of trades) {
-    const date = new Date(trade.tradeDate);
+    const [year, month, day] = trade.tradeDate.slice(0, 10).split('-').map(Number);
+    const date = new Date(year, month - 1, day);
     const dayName = days[date.getDay()];
     result[dayName].count++;
     result[dayName].pnl += trade.resultUsd;

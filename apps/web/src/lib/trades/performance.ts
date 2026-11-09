@@ -6,6 +6,25 @@ export function filterPerformanceTrades(trades: Trade[], days: number | null, ed
     trade.notes?.startsWith('[EDGE') || (edgeCollectionId && trade.collections.includes(edgeCollectionId))));
 }
 
+/** Group executions by the viewer's local hour, never by a date-only midnight. */
+export function calculateHourlyPerformance(trades: Pick<Trade, 'entryTime' | 'resultUsd' | 'resultR' | 'outcome'>[]) {
+  const hours = Array.from({ length: 24 }, (_, hour) => ({
+    hour: `${String(hour).padStart(2, '0')}:00`, hourNum: hour, pnl: 0, r: 0, count: 0, wins: 0,
+  }));
+  for (const trade of trades) {
+    const hour = hours[new Date(trade.entryTime).getHours()];
+    if (!hour) continue;
+    hour.pnl += trade.resultUsd;
+    hour.r += trade.resultR;
+    hour.count++;
+    if (trade.outcome === Outcome.WIN) hour.wins++;
+  }
+  return hours.filter(hour => hour.count > 0).map(hour => ({
+    ...hour, pnl: Number(hour.pnl.toFixed(2)), r: Number(hour.r.toFixed(2)),
+    winRate: Number((hour.wins / hour.count * 100).toFixed(1)),
+  }));
+}
+
 /** Breakeven interrupts either streak without counting as a win or loss. */
 export function calculateStreaks(trades: Pick<Trade, 'outcome'>[]) {
   const wins: number[] = [], losses: number[] = [];
