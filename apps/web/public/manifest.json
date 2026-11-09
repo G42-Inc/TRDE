@@ -1,0 +1,65 @@
+{
+  "name": "TRDE",
+  "short_name": "TRDE",
+  "description": "Analytics-first trading journal for futures and options traders",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#C9A962",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logos/TRDE_white_on_black_64x64.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    },
+    {
+      "src": "/logos/TRDE_white_on_black_128x128.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    },
+    {
+      "src": "/logos/TRDE_white_on_black_256x256.png",
+      "sizes": "256x256",
+      "type": "image/png"
+    },
+    {
+      "src": "/logos/TRDE_white_on_black_512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/logos/TRDE_white_on_black_512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logos/TRDE_white_on_black_1024x1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["finance", "productivity", "business"],
+  "shortcuts": [
+    {
+      "name": "New Trade",
+      "short_name": "New Trade",
+      "url": "/trades/new",
+      "icons": [{ "src": "/logos/TRDE_white_on_black_128x128.png", "sizes": "128x128" }]
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/app",
+      "icons": [{ "src": "/logos/TRDE_white_on_black_128x128.png", "sizes": "128x128" }]
+    },
+    {
+      "name": "Analytics",
+      "short_name": "Analytics",
+      "url": "/analytics",
+      "icons": [{ "src": "/logos/TRDE_white_on_black_128x128.png", "sizes": "128x128" }]
+    }
+  ]
+}
