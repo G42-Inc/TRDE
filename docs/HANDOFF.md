@@ -1,10 +1,22 @@
 # TRDE deployment handoff
 
-Updated by Z on November 8, 2026 (America/New_York).
+Updated by Z on November 9, 2026 (America/New_York).
 
 **Live URL: https://trde.rr-seshify.workers.dev**
 
-The existing web app is live and verified. Authenticated API persistence, provider webhooks and browser create/read/edit/reload passed. The final repair prevents background refresh from replacing an unsaved edit draft; immediate edit/save/reload passed on the deployed version.
+The existing web app is live and verified. Authenticated API persistence, provider webhooks and browser create/read/edit/reload passed, and the user confirmed their real login works. The latest deployment improves the public landing page, navigation, media sizes and static caching while preserving the journal backend. See the follow-up evidence below.
+
+## Landing and performance improvements — November 9, 2026
+
+The user confirmed their own login works and requested a smoother website with missing landing assets repaired. Source `f2e57cb1ab6ba7812015f2f5083c690f596edd6d` is published to the existing work branch. Worker version: `60fb50ab-e44b-4f2e-83a8-1aee9e5f0434`. Final live verification: passed on the live workers.dev URL: new page/branding, desktop and signed-in 320px mobile navigation, Escape and preview keyboard controls, no horizontal overflow, no new browser errors, and all checked public assets returned 200.
+
+- The landing route now renders its content on the server, with a native SVG gold-candlestick hero, visible navigation, a phone menu, and keyboard-accessible sample journal/performance/risk previews. Examples are explicitly labeled as illustrative data. Meaningful product links replace blank cards and the random-image WebGL globe. Signed-in calls to action link directly to the journal. Black-and-gold branding retained.
+- The landing page no longer imports Three/Fiber, CardSwap or the infinite WebGL explorer. Initial modern JavaScript decreased from 241,438 to 177,594 gzip bytes (26.4%). The former 244,257-byte hero and 29,156-byte card downloads are also absent. These are bundle-transfer measurements, not a claim of field Core Web Vitals or a universal loading-time percentage.
+- Dashboard command/help dialogs load on first opening. Shared dropdown controls gained keyboard/focus handling. Service-worker caching now covers explicitly public static assets only, bounds storage to 80 entries, bypasses navigation/RSC/API/private requests, and removes only obsolete TRDE caches. Push handlers unchanged; six focused regression tests added.
+- Cropped original brand art supplies two small lossless WebP wordmarks. Onboarding's missing poster is repaired using a real video frame; the missing WebM reference was removed. The original video was compressed from 9,713,891 to 1,393,523 bytes (85.7% smaller), with the same content at 720p, silent, fast-start; playback respects reduced motion and hidden tabs.
+- Six full-resolution scene JPEGs decreased from 12,866,844 to 4,428,068 bytes (65.6% smaller). Same content, paths and dimensions; visual comparisons and decoding checks passed. Other scene files are unchanged.
+- All 55 tests, typecheck, production Next/OpenNext build, full-artifact secret scan and Wrangler dry run passed. Production preview served all 21 checked landing assets successfully, including new wordmarks and poster. Browser checks passed desktop, 390px phone and 320px narrow layouts without horizontal page overflow; mobile open/close/Escape and anchor navigation; click/arrow-key preview tabs; pricing navigation. No new production-browser errors observed. The development eval bundle showed a preview-only parser error, so final interaction verification used the packaged production Worker.
+- No database, billing, authentication-policy or user-entitlement changes were made. User data and existing private configuration are preserved. Runtime source/bindings remain in the same authorized Cloudflare account; all GitHub publication remains in G42-Inc/TRDE. Local preview stopped and temporary deployment secret JSON removed; ignored mode0600 configuration retained.
 
 ## Preserve the user's instructions
 
@@ -26,8 +38,9 @@ The existing web app is live and verified. Authenticated API persistence, provid
 | Main migration checkpoint | `430e6570c702d356ead9a78fabfc46eba2a8b1ed` |
 | First-trade/local-date correction | `7b8573d73a3d567116daae6eff7553d2ae8f89f8` |
 | Calculations and webhook replay checkpoint | `d3040c54c72ab9abe0f56b36ae91ba91301f2be8` |
-| Final application source checkpoint | `7178054f0415c159cf7cc361c66b883ea930a8e7` |
-| Latest Worker version | `5794e405-0cce-458c-ad73-00c480276bb9` |
+| Journal draft reliability checkpoint | `7178054f0415c159cf7cc361c66b883ea930a8e7` |
+| Current application source checkpoint | `f2e57cb1ab6ba7812015f2f5083c690f596edd6d` |
+| Latest Worker version | `60fb50ab-e44b-4f2e-83a8-1aee9e5f0434` |
 | Live host | https://trde.rr-seshify.workers.dev |
 
 GitHub connector published exact staged trees, verified against local Git tree hashes before updating branch refs. No force-push or baseline recreation occurred. Final verification documentation may add a later docs-only commit; use `git log` for current HEAD.
@@ -54,7 +67,7 @@ Clerk and Stripe retain the existing **development/test** configuration. No prod
 
 ## Verification evidence
 
-- 49 focused regression tests pass. Web typecheck, production Next build and full OpenNext build pass without blanket type/build ignores. Final artifact guard and Wrangler dry run pass.
+- 55 focused regression tests pass, including the original 49 journal/auth/runtime cases and six static-cache cases. Web typecheck, production Next build and full OpenNext build pass without blanket type/build ignores. Final artifact guard and Wrangler dry run pass.
 - The secret guard removes server-only dotenv values from generated OpenNext configuration and scans the **entire** Worker output for configured private values. No matches remain. Cloudflare's 14 runtime bindings verified as `secret_text`.
 - New database read-only checks: server access 200; public key denied 401. Rollback-contained SQL tests cover trade/journal create/read/edit, fractional tick/price precision, ownership rejection and engagement functions. No SQL fixture records retained.
 - Nine real Clerk-token acceptance groups pass against the live Worker and dedicated Supabase, with no auth mocks: unauthorized/invalid/forged-header 401, real account access/admin spoof rejection, futures/options/EDGE exact create/read/edit, malformed 400, cross-user isolation/edit 409/deletion protection, journal save/read/edit and foreign reference rejection, todo takeover 409, migration roundtrip/isolation, demo writes 403.

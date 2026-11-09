@@ -13,12 +13,13 @@ current acceptance checkpoint and outstanding work.
 | Optional strategy and local form dates | `7b8573d73a3d567116daae6eff7553d2ae8f89f8` | `179f00e0-3221-4844-9f13-c4fe7c2b3a0d` |
 | Correct contract calculations, preserve imported history, and safe Clerk replay | `d3040c54c72ab9abe0f56b36ae91ba91301f2be8` | `f41c9a33-ff74-4a5a-aea6-4e79e7275893` |
 | Preserve unsaved drafts during background refresh | `7178054f0415c159cf7cc361c66b883ea930a8e7` | `5794e405-0cce-458c-ad73-00c480276bb9` |
+| Landing, navigation, media and static-cache improvements | `f2e57cb1ab6ba7812015f2f5083c690f596edd6d` | `60fb50ab-e44b-4f2e-83a8-1aee9e5f0434` |
 
-The fourth version is live and passes 49 focused tests, production builds, type
-validation and artifact secret scans. All nine authenticated API acceptance
-groups and the signed Clerk replay regression passed on the third version; the
-fourth changes only editor initialization and passed its immediate edit/save/reload
-browser regression. Final browser calculation and sign-out checks passed.
+The fifth version is live and passes 55 focused tests, production builds, type
+validation and artifact secret scans. The journal deployment was verified with
+nine authenticated API acceptance groups, signed webhook/replay checks and browser
+create/edit/reload/sign-out flows. The fifth version preserves those APIs and
+adds the verified landing/media/static-cache improvements documented below.
 
 ## Build and preview
 
@@ -156,7 +157,7 @@ not by themselves verify real payments or every subscription lifecycle case.
 ## Verified status and limits
 
 The production Next/OpenNext builds, type checks, and artifact secret scans passed.
-The current deployed build compressed to 2,439.58 KiB. Its landing page returned
+The current deployed build compressed to 2,440.98 KiB. Its landing page returned
 HTTP 200; signed-out and forged-header trade API requests returned HTTP 401.
 Nine acceptance groups using real Clerk tokens passed on the live URL, covering
 authenticated data save/read/edit and account isolation. Signed synthetic Stripe
@@ -187,6 +188,36 @@ connections, legacy analytics, and mobile are not production certification.
 Both webhook signing secrets are configured privately. Changing public backend
 configuration requires a fresh build; rotating stored-data encryption keys
 requires a separate migration plan.
+
+
+## Landing and media optimization follow-up
+
+The November 9 follow-up uses source `f2e57cb1ab6ba7812015f2f5083c690f596edd6d`.
+Worker version: `60fb50ab-e44b-4f2e-83a8-1aee9e5f0434`. It preserves the verified journal API,
+Clerk, Stripe and database configuration.
+
+The landing route is server-rendered with lightweight SVG artwork, visible mobile
+navigation and accessible sample-data previews. It no longer downloads the old
+Three/Fiber hero, animated blank cards or WebGL globe. Initial modern JavaScript
+fell 26.4% (241,438 → 177,594 gzip bytes), with another 273,413 gzip bytes of old
+hero/card downloads removed. These are bundle measurements, not field Web Vitals.
+Onboarding video size fell 85.7% (9.71 → 1.39 MB) and six full-resolution scene
+backgrounds fell 65.6% (12.87 → 4.43 MB). The missing poster and broken WebM
+reference were repaired. Private account data is never used in marketing previews.
+
+The service worker caches only explicitly public static assets, caps entries,
+refreshes unversioned assets, and retires previous TRDE page caches. Authenticated
+HTML, navigation, RSC, API, private images and token/query URLs bypass it. Existing
+push handlers are unchanged.
+
+All 55 tests, typecheck, Next/OpenNext build, artifact guard and dry run passed.
+Production preview browser checks covered desktop, 390px and 320px layouts,
+mobile menu and Escape behavior, tab keyboard controls, and pricing navigation.
+All 21 preview assets returned 200. Live verification also passed all 19 initial
+page assets, repaired video/poster and six scene images. Landing HTML decreased
+from 13,944 to 10,699 gzip bytes (23%). Network latency varied during sampling;
+no field loading-time or Core Web Vitals score is claimed. Final live verification:
+passed on the live workers.dev URL: new page/branding, desktop and signed-in 320px mobile navigation, Escape and preview keyboard controls, no horizontal overflow, no new browser errors, and all checked public assets returned 200.
 
 ## References
 
