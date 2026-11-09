@@ -149,7 +149,7 @@ export default function EditTradePage() {
         ? (formData.exitPrice - formData.entryPrice) * formData.quantity
         : (formData.entryPrice - formData.exitPrice) * formData.quantity;
       const resultUsd = pointsPnL * 12.5 - 10;
-      const resultR = resultUsd / formData.plannedRiskUsd;
+      const resultR = formData.plannedRiskUsd > 0 ? resultUsd / formData.plannedRiskUsd : 0;
       const outcome = resultR > 0.1 ? Outcome.WIN : resultR < -0.1 ? Outcome.LOSS : Outcome.BREAKEVEN;
 
       const futuresTrade = trade as FuturesTrade;
@@ -162,7 +162,7 @@ export default function EditTradePage() {
         exitTime,
         direction: formData.direction,
         quantity: formData.quantity,
-        feesUsd: futuresTrade.feesUsd || 10,
+        feesUsd: futuresTrade.feesUsd ?? 10,
         plannedRiskUsd: formData.plannedRiskUsd,
         resultUsd,
         resultR,
@@ -189,7 +189,8 @@ export default function EditTradePage() {
       const contractMultiplier = 100;
       const netPremiumPnLUsd = (formData.exitPremium - formData.entryPremium) * formData.quantity * contractMultiplier - 10;
       const resultUsd = netPremiumPnLUsd;
-      const resultR = resultUsd / (formData.entryPremium * formData.quantity * contractMultiplier);
+      const optionRisk = formData.entryPremium * formData.quantity * contractMultiplier;
+      const resultR = optionRisk > 0 ? resultUsd / optionRisk : 0;
       const outcome = resultR > 0.1 ? Outcome.WIN : resultR < -0.1 ? Outcome.LOSS : Outcome.BREAKEVEN;
 
       const optionsTrade = trade as OptionsTrade;
@@ -202,7 +203,7 @@ export default function EditTradePage() {
         exitTime,
         direction: Direction.LONG,
         quantity: formData.quantity,
-        feesUsd: optionsTrade.feesUsd || 10,
+        feesUsd: optionsTrade.feesUsd ?? 10,
         plannedRiskUsd: formData.entryPremium * formData.quantity * contractMultiplier,
         resultUsd,
         resultR,
@@ -233,22 +234,26 @@ export default function EditTradePage() {
     updatedTrade = { ...updatedTrade, disciplineFlags };
 
     const updatedTrades = trades.map((t) => (t.id === trade.id ? updatedTrade : t));
-    const result = await saveTrades(updatedTrades);
+    try {
+      const result = await saveTrades(updatedTrades);
     
-    // Show notification if violations were detected
-    if (result.newViolations.length > 0) {
-      const violationCount = result.newViolations.length;
-      const violationNames = result.newViolations[0].violatedRules
-        .map(getViolationRuleName)
-        .join(', ');
-      showToast(
-        `Risk rule violation detected! ${violationCount} rule${violationCount > 1 ? 's' : ''} broken: ${violationNames}. Review in Risk tab.`,
-        'warning',
-        8000
-      );
+      // Show notification if violations were detected
+      if (result.newViolations.length > 0) {
+        const violationCount = result.newViolations.length;
+        const violationNames = result.newViolations[0].violatedRules
+          .map(getViolationRuleName)
+          .join(', ');
+        showToast(
+          `Risk rule violation detected! ${violationCount} rule${violationCount > 1 ? 's' : ''} broken: ${violationNames}. Review in Risk tab.`,
+          'warning',
+          8000
+        );
+      }
+    
+      router.push(`/trades/${trade.id}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to save trade. Please try again.', 'error');
     }
-    
-    router.push(`/trades/${trade.id}`);
   };
 
   const toggleSetupTag = (tag: SetupTag) => {

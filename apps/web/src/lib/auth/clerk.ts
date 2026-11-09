@@ -1,5 +1,5 @@
 import { currentUser, auth } from '@clerk/nextjs/server';
-import { authLogger } from '@/lib/utils/logger';
+import { hasAdminMetadata } from './policy';
 
 /**
  * Get the current authenticated user's Clerk ID
@@ -31,29 +31,12 @@ export async function getClerkUser() {
  * MUST be checked server-side only
  */
 export async function isAdmin(): Promise<boolean> {
-  const user = await getClerkUser();
-  if (!user) {
-    authLogger.debug('isAdmin: No user found');
+  try {
+    const user = await getClerkUser();
+    return !!user && hasAdminMetadata(user.publicMetadata);
+  } catch {
     return false;
   }
-
-  // Never grant admin access from an unsigned browser cookie.
-  const metadata = user.publicMetadata || {};
-  const role = metadata.role as string | undefined;
-  
-  if (role === 'admin') {
-    authLogger.debug('Admin access granted via metadata role');
-    return true;
-  }
-  
-  // Check if user has admin in other metadata fields
-  if (metadata.isAdmin === true || metadata.admin === true) {
-    authLogger.debug('Admin access granted via metadata field');
-    return true;
-  }
-  
-  authLogger.debug('User is not admin');
-  return false;
 }
 
 /**

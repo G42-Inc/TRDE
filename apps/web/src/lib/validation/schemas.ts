@@ -11,95 +11,110 @@ import { z } from 'zod';
 // Trade Schemas
 // ============================================================================
 
-export const AssetClassEnum = z.enum(['futures', 'options']);
+// Keep the API contract aligned with packages/core and the BIGINT/JSONB SQL schema.
+export const AssetClassEnum = z.enum(['FUTURES', 'OPTIONS']);
+export const DirectionEnum = z.enum(['LONG', 'SHORT']);
+export const OutcomeEnum = z.enum(['WIN', 'LOSS', 'BREAKEVEN']);
+export const GradeEnum = z.enum(['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'F']);
+export const SessionEnum = z.enum(['ASIA', 'LONDON', 'NEW_YORK']);
+export const MarketRegimeEnum = z.enum(['TREND_UP', 'TREND_DOWN', 'RANGE', 'HIGH_VOLATILITY', 'LOW_VOLATILITY']);
 
-export const DirectionEnum = z.enum(['long', 'short']);
+const IdSchema = z.string().min(1).max(200).regex(/^[a-zA-Z0-9_.:-]+$/, 'Invalid identifier');
+const EpochSchema = z.number().int().min(0).max(8640000000000000);
+const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}, 'Invalid calendar date');
+const MoneySchema = z.number().min(-99999999.99).max(99999999.99);
+const PositiveMoneySchema = MoneySchema.nonnegative();
+const ImageUriSchema = z.string().max(7_000_000).refine(value => {
+  // Raster data URLs are emitted by ImageUpload; temporary blob/file URLs do not persist.
+  if (/^data:image\/(?:png|jpeg|gif|webp|avif);base64,[A-Za-z0-9+/]+=*$/.test(value)) return true;
+  try { return ['https:', 'http:'].includes(new URL(value).protocol); } catch { return false; }
+}, 'Use an HTTP(S) image URL or a PNG, JPEG, GIF, WebP or AVIF data URL');
 
-export const OutcomeEnum = z.enum(['win', 'loss', 'breakeven']);
-
-export const GradeEnum = z.enum(['A', 'B', 'C', 'D', 'F']).nullable().optional();
-
-export const SessionEnum = z.enum(['london', 'new_york', 'asia', 'overnight']).nullable().optional();
-
-export const MarketRegimeEnum = z.enum(['trending', 'ranging', 'volatile', 'quiet']).nullable().optional();
-
-/**
- * Base trade schema - common fields for all trade types
- */
 const BaseTradeSchema = z.object({
-  id: z.string().uuid(),
-  assetClass: AssetClassEnum,
-  createdAt: z.string().datetime().optional(),
-  updatedAt: z.string().datetime().optional(),
-  tradeDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
-  entryTime: z.string().optional().nullable(),
-  exitTime: z.string().optional().nullable(),
+  id: IdSchema,
+  createdAt: EpochSchema,
+  updatedAt: EpochSchema,
+  tradeDate: DateSchema,
+  entryTime: EpochSchema,
+  exitTime: EpochSchema,
   direction: DirectionEnum,
   quantity: z.number().int().positive().max(10000),
-  feesUsd: z.number().min(0).max(100000).optional().nullable(),
-  plannedRiskUsd: z.number().min(0).max(1000000).optional().nullable(),
-  resultUsd: z.number().min(-10000000).max(10000000),
-  resultR: z.number().min(-100).max(100).optional().nullable(),
+  feesUsd: PositiveMoneySchema,
+  plannedRiskUsd: PositiveMoneySchema,
+  resultUsd: MoneySchema,
+  resultR: z.number().min(-999999.9999).max(999999.9999),
   outcome: OutcomeEnum,
   grade: GradeEnum,
-  strategyId: z.string().max(100).optional().nullable(),
-  strategyVersionId: z.string().max(100).optional().nullable(),
+  strategyId: z.string().max(200).default(''),
+  strategyVersionId: z.string().max(200).default(''),
   session: SessionEnum,
   marketRegime: MarketRegimeEnum,
-  marketHoursTag: z.string().max(50).optional().nullable(),
-  setupTags: z.array(z.string().max(50)).max(20).optional(),
-  newsTags: z.array(z.string().max(100)).max(10).optional(),
-  mistakes: z.array(z.string().max(200)).max(10).optional(),
-  notes: z.string().max(10000).optional(),
-  attachments: z.array(z.string().url().max(2000)).max(10).optional(),
-  reviewFlag: z.boolean().optional(),
-  collections: z.array(z.string().max(100)).max(20).optional(),
-  disciplineFlags: z.record(z.string(), z.boolean()).optional(),
+  marketHoursTag: z.enum(['PREMARKET', 'RTH_OPEN', 'MIDDAY', 'POWER_HOUR', 'AFTER_HOURS', 'ETH']),
+  setupTags: z.array(z.string().max(50)).max(30).default([]),
+  newsTags: z.array(z.string().max(100)).max(20).default([]),
+  mistakes: z.array(z.string().max(200)).max(30).default([]),
+  managementStyle: z.enum(['SCALP', 'INTRADAY', 'SWING']).optional(),
+  notes: z.string().max(10000).default(''),
+  attachments: z.array(z.object({
+    id: IdSchema,
+    type: z.literal('image'),
+    uri: ImageUriSchema,
+    caption: z.string().max(2000).optional(),
+  })).max(10).default([]),
+  reviewFlag: z.boolean().default(false),
+  collections: z.array(z.string().max(200)).max(50).default([]),
+  disciplineFlags: z.object({
+    respectedDailyLossLimit: z.boolean(),
+    respectedMaxTrades: z.boolean(),
+    respectedMaxContracts: z.boolean(),
+    hadStopDefined: z.boolean(),
+    followedEntryRules: z.boolean(),
+    followedExitRules: z.boolean(),
+    journalCompleted: z.boolean(),
+  }),
 });
 
-/**
- * Futures-specific fields
- */
-const FuturesFieldsSchema = z.object({
-  instrumentRoot: z.string().min(1).max(20),
-  entryPrice: z.number().min(0).max(1000000).optional(),
-  exitPrice: z.number().min(0).max(1000000).optional(),
-  tickSize: z.number().positive().max(1000).optional(),
-  tickValueUsd: z.number().positive().max(10000).optional(),
-  pointsPnL: z.number().min(-100000).max(100000).optional(),
-  ticksPnL: z.number().min(-1000000).max(1000000).optional(),
-  rthEth: z.enum(['rth', 'eth']).optional().nullable(),
-});
+export const TradeSchema = z.discriminatedUnion('assetClass', [
+  BaseTradeSchema.extend({
+    assetClass: z.literal('FUTURES'),
+    instrumentRoot: z.string().min(1).max(20),
+    contractSymbol: z.string().max(100).optional(),
+    entryPrice: MoneySchema,
+    exitPrice: MoneySchema,
+    tickSize: z.number().positive().max(999999.9999).optional(),
+    tickValueUsd: PositiveMoneySchema.positive().optional(),
+    pointsPnL: z.number().min(-999999.9999).max(999999.9999),
+    ticksPnL: z.number().min(-999999.9999).max(999999.9999),
+    rthEth: z.enum(['RTH', 'ETH']),
+  }),
+  BaseTradeSchema.extend({
+    assetClass: z.literal('OPTIONS'),
+    underlying: z.string().min(1).max(20),
+    expiration: DateSchema,
+    dte: z.number().int().min(0).max(10000),
+    strike: PositiveMoneySchema,
+    optionType: z.enum(['CALL', 'PUT']),
+    entryPremium: PositiveMoneySchema,
+    exitPremium: PositiveMoneySchema,
+    netPremiumPnLUsd: MoneySchema,
+    contractMultiplier: z.number().int().min(1).max(10000),
+  }),
+]);
 
-/**
- * Options-specific fields
- */
-const OptionsFieldsSchema = z.object({
-  underlying: z.string().min(1).max(20),
-  expiration: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  dte: z.number().int().min(0).max(1000).optional(),
-  strike: z.number().min(0).max(100000).optional(),
-  optionType: z.enum(['call', 'put']).optional(),
-  entryPremium: z.number().min(0).max(100000).optional(),
-  exitPremium: z.number().min(0).max(100000).optional(),
-  netPremiumPnLUsd: z.number().min(-10000000).max(10000000).optional(),
-  contractMultiplier: z.number().int().min(1).max(10000).optional(),
-});
+export type ValidatedTrade = z.infer<typeof TradeSchema>;
 
-/**
- * Complete trade schema with asset-class-specific fields
- */
-export const TradeSchema = BaseTradeSchema.and(
-  FuturesFieldsSchema.partial()
-).and(
-  OptionsFieldsSchema.partial()
-);
-
-/**
- * Array of trades for bulk operations
- */
 export const TradesArraySchema = z.object({
   trades: z.array(TradeSchema).max(1000),
+  deletedIds: z.array(IdSchema).max(1000).default([]),
+  clearAll: z.boolean().default(false),
+}).superRefine(({ trades, deletedIds, clearAll }, ctx) => {
+  const ids = new Set(trades.map(trade => trade.id));
+  if (ids.size !== trades.length) ctx.addIssue({ code: 'custom', path: ['trades'], message: 'Duplicate trade identifiers' });
+  if (deletedIds.some(id => ids.has(id))) ctx.addIssue({ code: 'custom', path: ['deletedIds'], message: 'Cannot save and delete the same trade' });
+  if (clearAll && trades.length) ctx.addIssue({ code: 'custom', path: ['clearAll'], message: 'Cannot clear and save trades together' });
 });
 
 // ============================================================================

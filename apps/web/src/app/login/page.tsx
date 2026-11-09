@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 /**
@@ -9,7 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
  * Redirects to the canonical /sign-in page.
  * This ensures consistent auth flow through Clerk.
  */
-export default function LoginRedirect() {
+function LoginRedirectContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -28,5 +28,13 @@ export default function LoginRedirect() {
     <div className="min-h-screen flex items-center justify-center bg-black">
       <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
     </div>
+  );
+}
+
+export default function LoginRedirect() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center" role="status">Loading…</div>}>
+      <LoginRedirectContent />
+    </Suspense>
   );
 }

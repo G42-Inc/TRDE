@@ -18,186 +18,56 @@ export async function authenticateWithApiKey(
   userName: string,
   apiKey: string
 ): Promise<ProjectXAuthResponse> {
-  // Trim whitespace from credentials
-  const trimmedUserName = userName.trim();
-  const trimmedApiKey = apiKey.trim();
-  
-  console.log('Authenticating with ProjectX:', {
-    userName: trimmedUserName.substring(0, 3) + '...', // Log partial for security
-    apiKeyLength: trimmedApiKey.length,
-    apiKeyStartsWith: trimmedApiKey.substring(0, 5) + '...',
-  });
-
-  const requestBody = { 
-    userName: trimmedUserName, 
-    apiKey: trimmedApiKey 
-  };
-  
-  const fullUrl = `${PROJECTX_API_BASE}${PROJECTX_ENDPOINTS.AUTH_LOGIN_KEY}`;
-  const requestBodyJson = JSON.stringify(requestBody);
-  
-  console.log('=== PROJECTX AUTH REQUEST ===');
-  console.log('URL:', fullUrl);
-  console.log('Method: POST');
-  console.log('Headers:', {
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-  });
-  console.log('Body (JSON):', requestBodyJson);
-  console.log('Body (parsed):', requestBody);
-  console.log('UserName length:', trimmedUserName.length);
-  console.log('ApiKey length:', trimmedApiKey.length);
-  console.log('============================');
-
-  const response = await fetch(`${PROJECTX_API_BASE}${PROJECTX_ENDPOINTS.AUTH_LOGIN_KEY}`, {
+  const response = await fetchWithTimeout(`${PROJECTX_API_BASE}${PROJECTX_ENDPOINTS.AUTH_LOGIN_KEY}`, {
     method: 'POST',
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(requestBody),
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userName: userName.trim(), apiKey: apiKey.trim() }),
+    cache: 'no-store',
   });
-  
-  console.log('=== PROJECTX AUTH RESPONSE ===');
-  console.log('HTTP Status:', response.status, response.statusText);
-  console.log('Content-Type:', response.headers.get('content-type'));
-  console.log('All Headers:', Object.fromEntries(response.headers.entries()));
 
-  let data: any;
-  const responseText = await response.text();
-  console.log('Response body length:', responseText.length);
-  console.log('Response body (raw, full):', responseText);
-  console.log('Response body (first 2000 chars):', responseText.substring(0, 2000));
-  
-  try {
-    data = JSON.parse(responseText);
-    console.log('Response body (parsed JSON):', JSON.stringify(data, null, 2));
-  } catch (parseError) {
-    // If not JSON, use the text as error message
-    console.error('=== FAILED TO PARSE RESPONSE AS JSON ===');
-    console.error('Parse error:', parseError);
-    console.error('Response text (full):', responseText);
-    console.error('========================================');
-    throw new Error(`ProjectX authentication error: ${response.status} - ${responseText || 'Invalid response format'}`);
+  // Provider responses can include credentials or tokens. Never log or echo them.
+  const data = await readProjectXResponse<ProjectXAuthResponse>(response, 'authentication');
+  if (typeof data.token !== 'string' || !data.token) {
+    throw new Error('No token received from ProjectX authentication');
   }
-  
-  // Log the full response for debugging
-  console.log('=== RESPONSE ANALYSIS ===');
-  console.log('Has errorCode:', data.errorCode !== undefined);
-  console.log('errorCode:', data.errorCode);
-  console.log('errorMessage:', data.errorMessage);
-  console.log('Has token:', !!data.token);
-  console.log('Token length:', data.token?.length);
-  console.log('Has success:', data.success !== undefined);
-  console.log('success:', data.success);
-  console.log('HTTP Status:', response.status);
-  console.log('Response keys:', Object.keys(data));
-  console.log('Full response object:', data);
-  console.log('========================');
-
-  // Check for API-level errors first (even if HTTP status is 200)
-  // The API may return 200 OK but with errorCode in the body
-  if (data.errorCode !== undefined && data.errorCode !== 0) {
-    const errorMsg = data.errorMessage || `ProjectX authentication error code: ${data.errorCode}`;
-    console.error('ProjectX auth error:', {
-      errorCode: data.errorCode,
-      errorMessage: data.errorMessage,
-      httpStatus: response.status,
-      fullResponse: data,
-    });
-    throw new Error(errorMsg);
-  }
-
-  // Check HTTP status if errorCode check passed
-  if (!response.ok) {
-    throw new Error(`ProjectX authentication HTTP error: ${response.status} - ${data.errorMessage || 'Unknown error'}`);
-  }
-
-  if (!data.token) {
-    throw new Error('No token received from authentication');
-  }
-
-  return data as ProjectXAuthResponse;
+  return data;
 }
 
-/**
- * Make authenticated request to ProjectX API
- */
+async function readProjectXResponse<T>(response: Response, operation: string): Promise<T> {
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(`ProjectX ${operation} returned an invalid response (HTTP ${response.status})`);
+  }
+  if (!data || typeof data !== 'object') {
+    throw new Error(`ProjectX ${operation} returned an invalid response`);
+  }
+  if (!response.ok || data.success === false || (data.errorCode !== undefined && data.errorCode !== 0)) {
+    // An untrusted errorMessage could echo API credentials; expose status only.
+    throw new Error(`ProjectX ${operation} failed (HTTP ${response.status}). Check your connection and credentials.`);
+  }
+  return data as T;
+}
+
+/** Make authenticated requests without leaking credentials or private records. */
 async function projectXRequest<T>(
   endpoint: string,
   body: Record<string, any>,
   token: string
 ): Promise<T> {
-  if (!token) {
-    throw new Error('ProjectX token not provided');
-  }
-
-  const url = `${PROJECTX_API_BASE}${endpoint}`;
-  const headers = {
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`,
-  };
-  
-  console.log('ProjectX API Request:', {
-    url,
+  if (!token) throw new Error('ProjectX token not provided');
+  const response = await fetchWithTimeout(`${PROJECTX_API_BASE}${endpoint}`, {
     method: 'POST',
     headers: {
-      ...headers,
-      'Authorization': `Bearer ${token.substring(0, 20)}...` // Log partial token for debugging
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
     },
-    body: JSON.stringify(body, null, 2),
-  });
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
     body: JSON.stringify(body),
+    cache: 'no-store',
   });
-
-  // Read response as text first (can only be read once)
-  const responseText = await response.text();
-  
-  // Log response for debugging
-  console.log('ProjectX API Response:', {
-    status: response.status,
-    statusText: response.statusText,
-    contentType: response.headers.get('content-type'),
-    bodyLength: responseText.length,
-    bodyPreview: responseText.substring(0, 500),
-  });
-  
-  let data: any;
-  try {
-    data = JSON.parse(responseText);
-  } catch (error) {
-    // If response is not JSON, use the text as error message
-    const errorMessage = responseText.trim() || 'No response body';
-    if (!response.ok) {
-      throw new Error(`ProjectX API error: ${response.status} ${response.statusText} - ${errorMessage}`);
-    }
-    throw new Error(`ProjectX API error: Invalid JSON response - ${errorMessage}`);
-  }
-  
-  // Check for API-level errors first (even if HTTP status is 200)
-  // The API may return 200 OK but with errorCode in the body
-  if (data.errorCode !== undefined && data.errorCode !== 0) {
-    const errorMsg = data.errorMessage || `ProjectX API error code: ${data.errorCode}`;
-    console.error('ProjectX API error:', {
-      endpoint,
-      errorCode: data.errorCode,
-      errorMessage: data.errorMessage,
-      httpStatus: response.status,
-    });
-    throw new Error(errorMsg);
-  }
-
-  // Check HTTP status if errorCode check passed
-  if (!response.ok) {
-    throw new Error(`ProjectX API HTTP error: ${response.status} - ${data.errorMessage || 'Unknown error'}`);
-  }
-
-  return data as T;
+  return readProjectXResponse<T>(response, 'request');
 }
 
 /**
@@ -311,7 +181,6 @@ export async function searchTrades(
     body.endTimestamp = params.endTimestamp;
   }
 
-  console.log('ProjectX searchTrades request body:', JSON.stringify(body, null, 2));
 
   return projectXRequest<ProjectXTradesResponse>(PROJECTX_ENDPOINTS.TRADE_SEARCH, body, token);
 }

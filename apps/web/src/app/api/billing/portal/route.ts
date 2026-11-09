@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/clerk';
-import Stripe from 'stripe';
+import { getClerkUserId } from '@/lib/auth/clerk';
+import type Stripe from 'stripe';
+import { getStripeClient } from '@/lib/stripe/client';
 import { getStripeCustomerId } from '@/lib/stripe/customer';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limit';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-11-20.acacia' as any,
-});
 
 /**
  * POST /api/billing/portal
@@ -26,19 +24,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get authenticated user - prioritize header from middleware to avoid auth() detection issues
-    let userId: string | null = request.headers.get('x-clerk-user-id');
-    
-    // Fallback to requireAuth if header not available
+    const userId = await getClerkUserId();
     if (!userId) {
-      try {
-        userId = await requireAuth();
-      } catch (error: any) {
-        return NextResponse.json(
-          { error: 'Unauthorized: Authentication required' },
-          { status: 401 }
-        );
-      }
+      return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
     const origin = request.nextUrl.origin;
 
@@ -71,7 +59,7 @@ export async function POST(request: NextRequest) {
     // Create portal session with explicit configuration
     // Note: Portal features are configured in Stripe Dashboard → Settings → Billing → Customer Portal
     // This code creates a session - actual features (cancel, update plan, etc.) are configured in Stripe
-    const session = await stripe.billingPortal.sessions.create({
+    const session = await getStripeClient().billingPortal.sessions.create({
       customer: customerId,
       return_url: `${origin}/settings`,
       // Portal features (what users can do) are configured in Stripe Dashboard

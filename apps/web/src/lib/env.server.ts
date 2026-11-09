@@ -1,7 +1,7 @@
 /**
  * Environment Variable Validation
  * 
- * Validates all required environment variables at application startup.
+ * Validates configuration explicitly or lazily when a feature accesses it.
  * Throws errors with clear messages if any required variables are missing.
  */
 
@@ -110,36 +110,37 @@ export function validateEnvironmentVariables(): void {
 }
 
 /**
- * Get validated environment variables (with type safety)
+ * Resolve each setting at request time. Importing an optional feature must not
+ * require unrelated secrets or capture an empty Worker build-time environment.
  */
 export const env = {
   // Stripe
-  STRIPE_SECRET_KEY: getEnvVar('STRIPE_SECRET_KEY'),
-  STRIPE_WEBHOOK_SECRET: getEnvVar('STRIPE_WEBHOOK_SECRET'),
-  STRIPE_PRICE_ID_BASIC: getEnvVar('STRIPE_PRICE_ID_BASIC'),
-  STRIPE_PRICE_ID_EDGE: getEnvVar('STRIPE_PRICE_ID_EDGE'),
-  STRIPE_PRICE_ID_PRO: getEnvVar('STRIPE_PRICE_ID_PRO'),
+  get STRIPE_SECRET_KEY() { return getEnvVar('STRIPE_SECRET_KEY'); },
+  get STRIPE_WEBHOOK_SECRET() { return getEnvVar('STRIPE_WEBHOOK_SECRET'); },
+  get STRIPE_PRICE_ID_BASIC() { return getEnvVar('STRIPE_PRICE_ID_BASIC'); },
+  get STRIPE_PRICE_ID_EDGE() { return getEnvVar('STRIPE_PRICE_ID_EDGE'); },
+  get STRIPE_PRICE_ID_PRO() { return getEnvVar('STRIPE_PRICE_ID_PRO'); },
 
   // Supabase
-  NEXT_PUBLIC_SUPABASE_URL: getEnvVar('NEXT_PUBLIC_SUPABASE_URL'),
-  SUPABASE_SERVICE_ROLE_KEY: getEnvVar('SUPABASE_SERVICE_ROLE_KEY'),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
+  get NEXT_PUBLIC_SUPABASE_URL() { return getEnvVar('NEXT_PUBLIC_SUPABASE_URL'); },
+  get SUPABASE_SERVICE_ROLE_KEY() { return getEnvVar('SUPABASE_SERVICE_ROLE_KEY'); },
+  get NEXT_PUBLIC_SUPABASE_ANON_KEY() { return getEnvVar('NEXT_PUBLIC_SUPABASE_ANON_KEY'); },
 
   // Clerk
-  CLERK_WEBHOOK_SECRET: getEnvVar('CLERK_WEBHOOK_SECRET'),
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: getEnvVar('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY'),
+  get CLERK_WEBHOOK_SECRET() { return getEnvVar('CLERK_WEBHOOK_SECRET'); },
+  get NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY() { return getEnvVar('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY'); },
 
   // Encryption
-  ENCRYPTION_KEY: getEnvVar('ENCRYPTION_KEY'),
+  get ENCRYPTION_KEY() { return getEnvVar('ENCRYPTION_KEY'); },
 
   // Optional
-  WEBHOOK_RETRY_API_KEY: getOptionalEnvVar('WEBHOOK_RETRY_API_KEY'),
-  ALLOWED_ADMIN_EMAILS: getOptionalEnvVar('ALLOWED_ADMIN_EMAILS', 'admin@example.com'),
-  ADMIN_PASSWORD: getOptionalEnvVar('ADMIN_PASSWORD', ''),
-  NODE_ENV: getOptionalEnvVar('NODE_ENV', 'development'),
+  get WEBHOOK_RETRY_API_KEY() { return getOptionalEnvVar('WEBHOOK_RETRY_API_KEY'); },
+  get ALLOWED_ADMIN_EMAILS() { return getOptionalEnvVar('ALLOWED_ADMIN_EMAILS', 'admin@example.com'); },
+  get ADMIN_PASSWORD() { return getOptionalEnvVar('ADMIN_PASSWORD', ''); },
+  get NODE_ENV() { return getOptionalEnvVar('NODE_ENV', 'development'); },
   
   // AlphaVantage (for Flow tab)
-  ALPHA_VANTAGE_API_KEY: getOptionalEnvVar('ALPHA_VANTAGE_API_KEY'),
+  get ALPHA_VANTAGE_API_KEY() { return getOptionalEnvVar('ALPHA_VANTAGE_API_KEY'); },
 } as const;
 
 /**

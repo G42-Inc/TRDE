@@ -7,7 +7,7 @@
  * Shows confetti, optimistic progress, and smooth transition to app.
  */
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useUser } from '@clerk/nextjs';
 import Link from 'next/link';
@@ -24,7 +24,7 @@ const TIPS = [
   { title: 'Journal Everything', description: 'Notes on your mindset reveal emotional trading patterns.' },
 ];
 
-export default function CheckoutSuccessPage() {
+function CheckoutSuccessPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { user, isLoaded } = useUser();
@@ -341,5 +341,13 @@ export default function CheckoutSuccessPage() {
         </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+export default function CheckoutSuccessPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center" role="status">Loading…</div>}>
+      <CheckoutSuccessPageContent />
+    </Suspense>
   );
 }

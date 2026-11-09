@@ -1,3 +1,7 @@
+import { saveOwnedRecords, requireOwnedReferences } from '@/lib/db/owned-records';
+import { saveUserTrades } from '@/lib/trades/persistence';
+import { TradesArraySchema } from '@/lib/validation/schemas';
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -14,8 +18,7 @@ import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -24,10 +27,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const demo = await checkDemoStatus(userId);
+    if (demo.isDemo) return createDemoBlockedResponse('migrating data');
+
     const body = await request.json();
     const { data } = body;
 
-    if (!data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
       return NextResponse.json(
         { error: 'data object is required' },
         { status: 400 }
@@ -37,70 +43,15 @@ export async function POST(request: NextRequest) {
     const supabase = getSupabaseServiceClient();
     const results: Record<string, { success: boolean; count: number; error?: string }> = {};
 
-    // Migrate trades
-    if (data.trades && Array.isArray(data.trades)) {
+    // Share validation, zero-preserving serialization, and ownership-safe writes.
+    if (data.trades !== undefined) {
+      const validation = TradesArraySchema.safeParse({ trades: data.trades });
+      if (!validation.success) return NextResponse.json({ error: 'Invalid trade data' }, { status: 400 });
       try {
-        const dbTrades = data.trades.map((trade: any) => ({
-          id: trade.id,
-          user_id: userId,
-          asset_class: trade.assetClass,
-          created_at: trade.createdAt,
-          updated_at: trade.updatedAt,
-          trade_date: trade.tradeDate,
-          entry_time: trade.entryTime,
-          exit_time: trade.exitTime,
-          direction: trade.direction,
-          quantity: trade.quantity,
-          fees_usd: trade.feesUsd,
-          planned_risk_usd: trade.plannedRiskUsd,
-          result_usd: trade.resultUsd,
-          result_r: trade.resultR,
-          outcome: trade.outcome,
-          grade: trade.grade,
-          strategy_id: trade.strategyId || null,
-          strategy_version_id: trade.strategyVersionId || null,
-          session: trade.session,
-          market_regime: trade.marketRegime,
-          market_hours_tag: trade.marketHoursTag,
-          setup_tags: trade.setupTags || [],
-          news_tags: trade.newsTags || [],
-          mistakes: trade.mistakes || [],
-          notes: trade.notes || '',
-          attachments: trade.attachments || [],
-          review_flag: trade.reviewFlag,
-          collections: trade.collections || [],
-          discipline_flags: trade.disciplineFlags || {},
-          instrument_root: trade.instrumentRoot || null,
-          entry_price: trade.entryPrice || null,
-          exit_price: trade.exitPrice || null,
-          tick_size: trade.tickSize || null,
-          tick_value_usd: trade.tickValueUsd || null,
-          points_pnl: trade.pointsPnl || null,
-          ticks_pnl: trade.ticksPnl || null,
-          rth_eth: trade.rthEth || null,
-          underlying: trade.underlying || null,
-          expiration: trade.expiration || null,
-          dte: trade.dte || null,
-          strike: trade.strike || null,
-          option_type: trade.optionType || null,
-          entry_premium: trade.entryPremium || null,
-          exit_premium: trade.exitPremium || null,
-          net_premium_pnl_usd: trade.netPremiumPnlUsd || null,
-          contract_multiplier: trade.contractMultiplier || null,
-          metadata: trade.metadata || {},
-        }));
-
-        const { error } = await supabase
-          .from('trades')
-          .upsert(dbTrades, { onConflict: 'id' });
-
-        results.trades = {
-          success: !error,
-          count: dbTrades.length,
-          error: error?.message,
-        };
-      } catch (error: any) {
-        results.trades = { success: false, count: 0, error: error.message };
+        await saveUserTrades(supabase, userId, validation.data.trades);
+        results.trades = { success: true, count: validation.data.trades.length };
+      } catch {
+        results.trades = { success: false, count: 0, error: 'Unable to save trades. Refresh and retry.' };
       }
     }
 
@@ -117,14 +68,11 @@ export async function POST(request: NextRequest) {
           metadata: {},
         }));
 
-        const { error } = await supabase
-          .from('user_strategies')
-          .upsert(dbStrategies, { onConflict: 'id' });
+        await saveOwnedRecords(supabase, 'user_strategies', userId, dbStrategies);
 
         results.strategies = {
-          success: !error,
+          success: true,
           count: dbStrategies.length,
-          error: error?.message,
         };
       } catch (error: any) {
         results.strategies = { success: false, count: 0, error: error.message };
@@ -145,14 +93,12 @@ export async function POST(request: NextRequest) {
           metadata: {},
         }));
 
-        const { error } = await supabase
-          .from('user_strategy_versions')
-          .upsert(dbVersions, { onConflict: 'id' });
+        await requireOwnedReferences(supabase, 'user_strategies', userId, data.versions.map((version: any) => version.strategyId));
+        await saveOwnedRecords(supabase, 'user_strategy_versions', userId, dbVersions);
 
         results.versions = {
-          success: !error,
+          success: true,
           count: dbVersions.length,
-          error: error?.message,
         };
       } catch (error: any) {
         results.versions = { success: false, count: 0, error: error.message };
@@ -173,14 +119,11 @@ export async function POST(request: NextRequest) {
           metadata: {},
         }));
 
-        const { error } = await supabase
-          .from('collections')
-          .upsert(dbCollections, { onConflict: 'id' });
+        await saveOwnedRecords(supabase, 'collections', userId, dbCollections);
 
         results.collections = {
-          success: !error,
+          success: true,
           count: dbCollections.length,
-          error: error?.message,
         };
       } catch (error: any) {
         results.collections = { success: false, count: 0, error: error.message };
@@ -236,14 +179,11 @@ export async function POST(request: NextRequest) {
           metadata: {},
         }));
 
-        const { error } = await supabase
-          .from('quick_journals')
-          .upsert(dbJournals, { onConflict: 'id' });
+        await saveOwnedRecords(supabase, 'quick_journals', userId, dbJournals);
 
         results.quickJournals = {
-          success: !error,
+          success: true,
           count: dbJournals.length,
-          error: error?.message,
         };
       } catch (error: any) {
         results.quickJournals = { success: false, count: 0, error: error.message };
@@ -264,14 +204,12 @@ export async function POST(request: NextRequest) {
           metadata: {},
         }));
 
-        const { error } = await supabase
-          .from('trade_journals')
-          .upsert(dbJournals, { onConflict: 'id' });
+        await requireOwnedReferences(supabase, 'trades', userId, data.journals.map((journal: any) => journal.tradeId));
+        await saveOwnedRecords(supabase, 'trade_journals', userId, dbJournals);
 
         results.journals = {
-          success: !error,
+          success: true,
           count: dbJournals.length,
-          error: error?.message,
         };
       } catch (error: any) {
         results.journals = { success: false, count: 0, error: error.message };
@@ -296,14 +234,11 @@ export async function POST(request: NextRequest) {
           metadata: {},
         }));
 
-        const { error } = await supabase
-          .from('weekly_reviews')
-          .upsert(dbReviews, { onConflict: 'id' });
+        await saveOwnedRecords(supabase, 'weekly_reviews', userId, dbReviews);
 
         results.weeklyReviews = {
-          success: !error,
+          success: true,
           count: dbReviews.length,
-          error: error?.message,
         };
       } catch (error: any) {
         results.weeklyReviews = { success: false, count: 0, error: error.message };
@@ -327,14 +262,11 @@ export async function POST(request: NextRequest) {
           metadata: {},
         }));
 
-        const { error } = await supabase
-          .from('todos')
-          .upsert(dbTodos, { onConflict: 'id' });
+        await saveOwnedRecords(supabase, 'todos', userId, dbTodos);
 
         results.todos = {
-          success: !error,
+          success: true,
           count: dbTodos.length,
-          error: error?.message,
         };
       } catch (error: any) {
         results.todos = { success: false, count: 0, error: error.message };
@@ -346,7 +278,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: allSuccess,
       results,
-    });
+    }, { status: allSuccess ? 200 : 409 });
   } catch (error: any) {
     console.error('Error in migration:', error);
     return NextResponse.json(

@@ -8,8 +8,8 @@
  */
 
 import { cache } from 'react';
-import { currentUser, clerkClient, auth } from '@clerk/nextjs/server';
-import { headers } from 'next/headers';
+import { currentUser } from '@clerk/nextjs/server';
+import { getClerkUserId } from './clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
 import type { PlanTier, Entitlement } from '@/lib/entitlements/types';
 import { hasPlanAccess } from '@/lib/entitlements/types';
@@ -41,57 +41,9 @@ export const checkUserAccess = cache(async function checkUserAccess(
   requiredPlan: PlanTier = 'basic'
 ): Promise<AccessCheckResult> {
   try {
-    // Get userId if not provided
-    let finalUserId: string | null = userId || null;
-    
-    if (!finalUserId) {
-      // Try multiple methods to get the userId (in order of reliability)
-      
-      // Method 1: Check x-clerk-user-id header (set by middleware)
-      try {
-        const headersList = await headers();
-        const headerUserId = headersList.get('x-clerk-user-id');
-        if (headerUserId && headerUserId.startsWith('user_')) {
-          finalUserId = headerUserId;
-        }
-      } catch {
-        // headers() unavailable in this context
-      }
-      
-      // Method 2: Try auth() helper
-      if (!finalUserId) {
-        try {
-          const authResult = await auth();
-          if (authResult.userId) {
-            finalUserId = authResult.userId;
-          }
-        } catch {
-          // auth() unavailable
-        }
-      }
-      
-      // Method 3: Try currentUser()
-      if (!finalUserId) {
-        try {
-          const user = await currentUser();
-          if (user?.id) {
-            finalUserId = user.id;
-          }
-        } catch {
-          // currentUser() failed
-        }
-      }
-      
-      // If all methods failed, user is not authenticated
-      if (!finalUserId) {
-        return {
-          hasAccess: false,
-          entitlement: null,
-          isAdmin: false,
-          userId: null,
-          error: 'No user authenticated',
-        };
-      }
+    const finalUserId = await getClerkUserId();
+    if (!finalUserId || (userId && userId !== finalUserId)) {
+      return { hasAccess: false, entitlement: null, isAdmin: false, userId: null, error: 'No user authenticated' };
     }
 
     // Check if user is admin (via Clerk metadata)

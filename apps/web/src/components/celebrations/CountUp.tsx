@@ -42,8 +42,8 @@ export function CountUp({
   onComplete,
 }: CountUpProps) {
   const [displayValue, setDisplayValue] = useState(from);
-  const animationRef = useRef<number>();
-  const startTimeRef = useRef<number>();
+  const animationRef = useRef<number | undefined>(undefined);
+  const startTimeRef = useRef<number | undefined>(undefined);
   const completedRef = useRef(false);
 
   useEffect(() => {

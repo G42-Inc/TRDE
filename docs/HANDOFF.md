@@ -1,45 +1,68 @@
 # TRDE project and deployment handoff
 
-Prepared by Z on November 8, 2026, using America/New_York dates.
+Updated by Z on November 8, 2026 (America/New_York). **No live deployment has been verified yet.**
 
-TRDE's starting source is published publicly in **[G42-Inc/TRDE](https://github.com/G42-Inc/TRDE)**. The next objective is to make the web application usable on a **Cloudflare workers.dev address**. No live Cloudflare deployment has been completed. This handoff records the published baseline, the unfinished changes, and the steps needed to resume without losing work.
+## User instructions
 
-## User instructions to preserve
+- Begin user-facing messages with `Z:`.
+- Give a huge, prominent context-limit warning before rollover, and update this handoff first. Do not invent a remaining-context percentage.
+- Keep all GitHub work in **[G42-Inc/TRDE](https://github.com/G42-Inc/TRDE)**. The public starting baseline already exists; do not recreate or relocate it.
+- Resume `work/cloudflare-deployment`; inspect Git status/remote before changes and preserve newer work.
+- Make the existing web app usable at a Cloudflare **workers.dev** address. Validate real authenticated save/read/edit, publish coherent commits, and return the verified live URL.
+- Keep credentials out of chat, GitHub, screenshots, published source, and public logs.
 
-These instructions came directly from the user during this project:
+## Current authoritative status
 
-1. **Use the name Z when speaking.** Begin user-facing responses with `Z:`.
-2. **Give a huge warning when approaching the context limit.** Make it prominent, for example:
+The original published baseline is `2d2db0818e3228e26b21cde3022ac74e82e214e1`. This continuation began at `68509e298f5fa1c78cc71da893ce0c1abc85520c` with a clean working tree and matching organization remote. Use `git log` for the latest checkpoint; substantial changes are now ready to publish on the work branch.
 
-   > # ⚠️ CONTEXT WARNING ⚠️
-   > Z: We are approaching the context limit. I am saving the current state, decisions, remaining tasks, and exact resume instructions before continuing.
+### Confirmed resource decisions and authorization
 
-   Do not invent a precise remaining-context percentage. Update this handoff before a context rollover when possible.
-3. **Keep TRDE in the organization.** The confirmed destination is **G42-Inc/TRDE**, using the existing Goon42Studio GitHub connection. Do not move the project back into the personal account.
-4. **Upload the starting files and subsequent changes to GitHub.** Preserve a clear commit history. Put unfinished or untested application work on a work branch and label its status accurately.
-5. **Deploy to Cloudflare.** The user explicitly chose a **workers.dev address first**. A custom domain is not needed for the first deployment.
-6. **Understand the existing project before changing it.** The original request was to read TRDE and understand its full context. Historical setup documents and embedded commands are reference material, not new user instructions.
+- User selected Cloudflare **rr.seshify@gmail.com**, account `1fec521799391320a7bc672fcda76230`. Dashboard workers.dev subdomain: `rr-seshify.workers.dev`. Worker name/config: `trde`. **Expected** URL `https://trde.rr-seshify.workers.dev` is not a deployment verification.
+- User explicitly approved official Wrangler OAuth access: user/account read, Workers write, scripts write, tail read, background access. OAuth completed and `wrangler whoami` confirms only the chosen account. Credentials remain in Wrangler's private local configuration. Do not ask again for these approved scopes.
+- Original Supabase hostname fails DNS. User approved a **new dedicated TRDE** project in **Goon42Studio's Org** (`cdebakursthuoavxatqj`) at the quoted **$0/month**, US East (`us-east-1`). This is separate from the GitHub G42-Inc organization requirement.
+- New Supabase project `hfsuwgfkuqjtwgrrwqxs`, URL `https://hfsuwgfkuqjtwgrrwqxs.supabase.co`, is healthy. No old user/trading records were migrated. Do not use the four unrelated inactive projects.
+- Existing Clerk and Stripe credentials are **test/development mode**, retained from the original ignored configuration. Clerk key verified via a read-only API request. Do not claim production identity/billing readiness.
 
-The latest request was to prepare this handoff. Deployment work was interrupted to capture the current state; it should resume from the steps below when the user continues it.
+### Completed code and database work
 
-## Repository and saved state
+- Upgraded web to Next **15.5.29**, React/DOM **19.3.1**, Clerk **6.39.8**, OpenNext **1.20.16**, Wrangler **4.158.0**; related graphics/UI packages updated. `react-resizable-panels` pinned **4.3.0** because newer releases use React.Activity absent in Next15's vendored runtime. Node **24.22.1**, pnpm **11.25.0**. Mobile manifests unchanged; optional native peer warnings remain and mobile is not validated.
+- All direct identity-header, unsigned JWT, and unsigned admin-cookie authorization removed. Clerk verified sessions/metadata are authoritative. Signed-out APIs return401, pages redirect, mobile Bearer tokens are verified; Clerk webhooks verify raw bytes and retry auth fails closed.
+- Trades now match core/UI shape: uppercase assets/direction, text IDs, epoch timestamps, grades/regimes, attachment objects, valid numeric zeroes. Owner-scoped insert/update prevents ID takeover. Explicit deletions replace whole-cache deletion semantics. Save errors reach forms; caches distinguish failed cloud fetch from successful empty data and isolate account changes.
+- Other global-ID data writes and migration use owner-safe helpers. Journals/strategy versions validate related ownership. Journal saves await server confirmation; request payload names fixed.
+- Workers runtime uses lazy config, Stripe fetch transport, async Web Crypto signatures, no jsdom/isomorphic-dompurify, and no ProjectX credential/response logging. CSP includes configured Clerk host. React19/build errors repaired without blanket ignores.
+- OpenNext/Wrangler/static header configuration added. **OpenNext copies local dotenv secrets into generated server code by default.** `apps/web/scripts/prepare-worker.mjs` removes all nonpublic dotenv values from generated `cloudflare/next-env.mjs` and scans the entire output for configured private values. Canonical build/preview/deploy scripts run this guard. Always run it immediately before any direct upload. Production secrets belong in Worker bindings, never source.
+- Canonical new-project SQL: `apps/web/supabase/bootstrap.sql`, plus `patches/precise-instrument-prices.sql`. Applied as migrations `trde_server_only_baseline` and `trde_precise_instrument_prices`. 34 tables all have RLS; anon/authenticated have no table/view grants or executable app functions. Ownership is immutable; functions/views use invoker rights. Private/community strategy models separated; journals use expected JSONB. 46 static achievement definitions only, no real user seeds. Security advisor clean; unused-index INFO notices expected on fresh database.
 
-| Item | State |
-| --- | --- |
-| Organization repository | [G42-Inc/TRDE](https://github.com/G42-Inc/TRDE), public |
-| Published starting baseline | [`2d2db0818e3228e26b21cde3022ac74e82e214e1`](https://github.com/G42-Inc/TRDE/commit/2d2db0818e3228e26b21cde3022ac74e82e214e1) |
-| Baseline contents | 675 tracked files: web app, mobile app, shared packages, documentation, fonts, images, and video |
-| Baseline verification | Uploaded Git tree matched the prepared local snapshot exactly |
-| Baseline Git tree | `d975fa96891c719b8eeb32e7ad44ab55691283cb` |
-| Work branch for resuming | `work/cloudflare-deployment` |
-| Work branch scope | This handoff plus two unfinished authentication hardening files |
-| Live Cloudflare URL | None verified; deployment is still outstanding |
+### Private local configuration
 
-The repository was initially created under Goon42Studio and then transferred to G42-Inc at the user's request. Goon42Studio is the connected GitHub identity; the integration has write access through the G42-Inc organization.
+`apps/web/.env.local` is ignored and mode0600. It now contains the new Supabase publishable/server keys, retained Clerk/Stripe test config, freshly generated encryption keys for this new empty database, retry key, and newly provisioned webhook secrets. Do not rotate encryption keys later if stored encrypted records exist.
 
-The working repository is a separate copy of the original downloaded TRDE folder. The original download was not modified. The upload was a clean snapshot, not a publication of the previous owner's Git history. It includes the source changes that were already present in the download, including the landing-page work.
+- Clerk endpoint enabled at expected URL + `/api/clerk/webhook`, subscribed to user.created/user.updated/user.deleted. `CLERK_WEBHOOK_SECRET` saved privately. There were no existing webhook endpoints; none were replaced.
+- Stripe TEST endpoint enabled at expected URL + `/api/billing/webhook`, six handled events, API version2024-11-20.acacia. New `STRIPE_WEBHOOK_SECRET` saved privately. Three configured prices verified active USD monthly test prices ($9.99/$14.99/$19.99). No prior endpoints changed.
+- **Keep `.dev.vars` synchronized with `.env.local` before local Worker testing**, especially after webhook secrets were added. Keep both ignored/mode0600. Public variable changes require a fresh build.
+- Runtime Node path: `/Users/zanoni/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin`; pnpm wrapper already on PATH but needs Node prepended. Network/build/listen operations may require sandbox escalation. GitHub connector works for publication; public git fetch works with network access.
+- Wrangler supports `deploy --secrets-file <JSON file>` to upload runtime secrets atomically with a version. Use an ignored mode0600 JSON file or private temp path, avoid values in command arguments. `--env-file` alone does not upload secrets.
 
-Before publication, Z removed a concrete Stripe webhook secret from a setup document, replaced personal admin-contact and home-directory details with placeholders, improved `.gitignore`, and excluded generated Expo state, build logs, the TypeScript build cache, and a duplicate SQL backup. Dependencies and environment files were not uploaded. These were publication cleanup changes, not a completed application repair.
+### Verification already passed
+
+- Web typecheck and production Next build, full OpenNext build, Wrangler dry run.
+- Initial gzip Worker size2440.68KiB (below free3MiB limit), largest asset9.7MB. Recheck final deployment artifact after remaining changes.
+- Complete generated Worker scan after guard: no configured private secret matches.
+- 29 focused tests at checkpoint: auth signatures/admin/headers, ownership/races, trade contracts/storage, runtime. New guard and billing tests may increase count; rerun all before publication.
+- Live SQL rollback-contained create/read/edit, attachments/zeroes, journal JSONB, immutable ownership rejection, XP/streak functions, fractional instrument price/tick precision. Test SQL records rolled back.
+- Local real Worker at `http://localhost:8787` returned landing200, signed-out/forged-header API401, protected-page307, invalid Stripe signature400.
+- **Real Clerk session tokens + new Supabase, no mocked auth** passed nine acceptance groups against local Worker: authorized trade/journal create/read/edit (futures/options/EDGE), zeros/attachments, invalid payload400, foreign write409/read isolation/delete no-op, related journal protection, todo takeover409, demo save403, admin spoof rejection, migration roundtrip/cross-owner rejection.
+- `apps/web/scripts/acceptance.mjs` is opt-in, uses two marked isolated Clerk test users and comped Pro fixtures. It never impersonates existing users or prints JWTs. Temporary fixture state retained at `/tmp/trde-e2e-acceptance.json` (mode0600) for live rerun/browser QA. Fixed Clerk test email code424242; emails use +clerk_test@example.com. Cleanup verifies metadata ownership and revokes sessions before deleting only fixtures.
+
+## Work remaining (in order)
+
+1. Finish targeted Stripe retry reliability repairs currently in progress: previously failed event IDs were treated as completed, and retry payload shape differed. Runtime agent owns repair/tests; update `docs/CLOUDFLARE.md` to reflect actual final state.
+2. Synchronize local runtime env, rerun test suite/typecheck, build+guard final artifact. Verify public and server deploy outputs contain no configured private values.
+3. Publish coherent changes to G42-Inc/TRDE work branch using GitHub connector (baseline remains on main). Fetch before moving ref; preserve newer remote changes. Avoid committing environment files/builds/private fixtures.
+4. Deploy guarded artifact to selected account using Wrangler with private secret JSON. No paid upgrade authorized or expected; stop if a paid plan becomes necessary. Record actual deployment URL/version.
+5. Rerun real acceptance script with `TRDE_ACCEPTANCE_TESTS=1 TRDE_ACCEPTANCE_REUSE=1 TRDE_ACCEPTANCE_KEEP_FIXTURES=1 TRDE_ACCEPTANCE_STATE_FILE=/tmp/trde-e2e-acceptance.json TRDE_ACCEPTANCE_BASE_URL=<actual live URL>` and `node --env-file=.env.local scripts/acceptance.mjs` from apps/web. Perform browser sign-in/save/reload/edit, not only backend requests.
+6. Verify Clerk/Stripe signed webhook delivery at actual host and test-mode checkout access. Existing actual account entitlements were not migrated; no real-money billing verified.
+7. Update this handoff/deployment doc with verified live URL, version/commit, final tests, and concrete remaining limitations; publish final coherent follow-up. Clean only marked isolated acceptance fixtures when browser QA done.
 
 ## What TRDE is
 
@@ -88,69 +111,6 @@ Useful starting points:
 
 Web persistence currently mixes a user-scoped local cache with Supabase-backed API calls. Trades save immediately after local state is updated; many other data types use a debounce. EDGE has additional browser-local storage. This is not yet a fully validated multi-device reconciliation system.
 
-## Work completed after the baseline
-
-Two authentication files have draft edits preserved on `work/cloudflare-deployment`:
-
-1. `apps/web/src/lib/auth/clerk.ts` now obtains identity from verified Clerk `auth()` rather than trusting an incoming `x-clerk-user-id`. It also removes admin authorization through an unsigned browser cookie, retaining server-controlled Clerk metadata checks.
-2. `apps/web/src/middleware.ts` now strips an incoming identity header before forwarding a request and only inserts a verified Clerk user ID. It adds omitted protected routes and returns JSON 401 responses for unauthenticated protected APIs, while retaining page redirects and public webhook exceptions.
-
-**These edits have not passed a build or authentication regression tests.** The planned direct changes to billing portal/subscription/session-verification handlers were not started. Those handlers still read the custom identity header; the middleware change is intended to sanitize it. The mobile auth helper was not changed.
-
-No trade-schema repair, dependency upgrade, Wrangler configuration, database migration, cloud deployment, or live end-to-end test has been completed. Dependency installation and a read-only backend connectivity check were attempted, but that tool invocation was interrupted. At the handoff inspection, the working copy had no install log, no `node_modules`, and no copied web environment file, so do not assume those operations succeeded.
-
-## Existing configuration and access
-
-The original downloaded web app has an ignored `.env.local`, and the original mobile app has an ignored `.env`. Their values must stay out of chat, GitHub, screenshots, public logs, and this document.
-
-The inspected web configuration contains Clerk and Stripe **test** keys, Supabase configuration, Stripe price IDs, and an admin password. It lacks `CLERK_WEBHOOK_SECRET` and `ENCRYPTION_KEY`. The configured Supabase project is not one of the projects returned by the connected Supabase account, and its reachability was not verified. Resolve ownership/access before choosing a database or applying migrations. Do not repurpose an unrelated connected project.
-
-Configuration to inventory before deployment includes:
-
-- Clerk publishable, secret, and webhook keys; correct allowed URLs and redirect settings.
-- Supabase URL, client key, and server service-role key, with the intended schema and access rules.
-- Stripe secret and publishable keys, webhook signing secret, and Basic/Edge/Pro price IDs.
-- `ENCRYPTION_KEY`, a 32-byte base64 value used by one token-vault path.
-- `API_KEY_ENCRYPTION_SECRET`, used by a separate provider-key storage path. Do not assume it is interchangeable with `ENCRYPTION_KEY` or change either blindly when stored encrypted data may exist.
-- Optional provider, retry/cron, notification, and admin settings only for features being enabled.
-
-No dedicated Cloudflare plugin was found in the available plugin search. A Cloudflare dashboard tab was opened, but only its loading state was observed; a signed-in account, Worker, and workers.dev hostname were not verified. Continue using the Cloudflare dashboard and/or Wrangler after authentication.
-
-The Mac has a bundled Node v24.22.1 runtime that is not on the normal shell PATH, and a pnpm wrapper was found. Locate and use a suitable installed runtime before concluding Node is unavailable. Git command-line publishing credentials are not configured; the GitHub connector successfully published the baseline. Public Git fetches worked when network access was allowed.
-
-## Deployment path to validate
-
-Use a full-stack **Cloudflare Worker**. A static export would not provide TRDE's API routes, server actions, authentication, billing, or database operations.
-
-The research recommendation is to retain Next.js and use OpenNext. Cloudflare's current default recommendation is vinext, but it is marked beta; no TRDE compatibility check was run against it. OpenNext is the proposed lower-change route, not an already-tested migration.
-
-As checked on November 8, 2026, OpenNext `@opennextjs/cloudflare@1.20.16` requires at least Next.js `15.5.29` or `16.4.5`. The proposed smaller upgrade is the patched Next 15 line. Recheck current release/security requirements when resuming instead of installing the old baseline or blindly using these versions indefinitely.
-
-The upgrade has related dependencies: React/React DOM 19 and types, a compatible Clerk release, Fiber 9 rather than Fiber 8 for React 19, compatible postprocessing, and peer-dependency checks for the other UI packages. Clerk's migration changes singleton calls such as `clerkClient.users` to the supported awaited client API. No package versions have been changed yet.
-
-Primary references:
-
-- [Cloudflare Next.js deployment guide](https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/)
-- [OpenNext release requirements](https://github.com/opennextjs/opennextjs-cloudflare/releases)
-- [OpenNext setup](https://opennext.js.org/cloudflare/get-started)
-- [OpenNext environment variables](https://opennext.js.org/cloudflare/howtos/env-vars)
-- [OpenNext Stripe guidance](https://opennext.js.org/cloudflare/howtos/stripeAPI)
-- [Next.js 15 upgrade guide](https://nextjs.org/docs/app/guides/upgrading/version-15)
-- [Clerk Next.js v6 migration](https://clerk.com/docs/guides/development/upgrading/upgrade-guides/nextjs-v6)
-
-## Next steps in order
-
-1. **Resume from the work branch.** Read this file, inspect `git status`, fetch the organization repository, and compare the current branch with `main`. Preserve any newer user work. Do not recreate the starting upload.
-2. **Confirm Cloudflare and backend access.** Verify the intended Cloudflare account and workers.dev subdomain. Check the original TRDE Supabase endpoint using a read-only request without retrieving private records. Resolve the project/account mismatch and missing secrets. Keep test billing distinct from real payments.
-3. **Set up a reproducible build.** Resolve the local Node runtime, install dependencies, and select supported Next/OpenNext/React/Clerk versions together. Update package and lockfiles consistently. Do not skip type/build errors through blanket ignore settings.
-4. **Finish and test authentication hardening.** Test signed-out API 401s, normal page redirects, forged identity-header rejection, valid browser sessions, mobile Bearer-token handling, admin authorization, and signed public webhooks. Replace remaining direct header-trust paths where needed.
-5. **Repair trade persistence before calling the app usable.** Align validation and serialization with the actual UI/core/SQL contract. UI IDs are text, enums are uppercase, timestamps are epoch milliseconds, grades include plus/minus variants, regimes differ from the old schema validator, and attachments are objects with image URIs. Preserve valid numeric zeroes instead of converting them to null with `||`. Test futures, options, and EDGE save/read/edit roundtrips plus malformed-input rejection. The inspected SQL already supports these shapes; a database migration was not shown to be necessary.
-6. **Address Workers runtime risks.** Configure Stripe's fetch transport and test webhook verification in Workers. Review the server bundle's `isomorphic-dompurify`/jsdom dependency, eager environment reads, Node crypto compatibility, and the CSP's Clerk domain allowlist. Remove credential/response-body logging from the ProjectX authentication client before enabling broker connections publicly.
-7. **Add deployment configuration.** Add `apps/web/open-next.config.ts`, `apps/web/wrangler.jsonc`, build/preview/deploy scripts, static-asset handling, and documented Node compatibility settings. Ignore `.open-next`, `.wrangler`, and `.dev.vars`. Keep the monorepo workspace dependencies available during the build.
-8. **Configure build and runtime environments securely.** `NEXT_PUBLIC_*` values must be present at build time; server secrets belong in the deployment's secret storage. Do not commit secret files. Configure only the resources needed for this application, and confirm any newly required paid plan before purchasing it.
-9. **Verify locally before deployment.** Run type checks, a production Next build, the OpenNext build, and a Workers preview. Test page loading, sign-in, entitlement handling, a trade that survives refresh, editing, journal saving, and unauthorized API rejection. Add focused regression tests for repaired behavior.
-10. **Publish and verify the live workers.dev site.** Configure Clerk/Stripe endpoints for the resulting URL, validate webhook delivery, and test core flows on the deployed host. A successful build or a visible landing page alone does not establish that authenticated saving works. Return the actual verified URL and any remaining limitations.
-11. **Keep GitHub current.** Commit coherent changes to G42-Inc/TRDE, preserve unfinished work on a branch, and update this handoff with the deployed URL, validation results, current commit, and remaining tasks. Set up deployment from the organization repository once the initial build is working.
 
 ## Other known issues to retain in the backlog
 
@@ -167,6 +127,7 @@ These are source-review findings, not completed repairs:
 
 The first deployment objective is a usable web journal. Do not silently claim every legacy feature or mobile workflow is ready just because the web site is online.
 
-## Prompt to resume in a new chat
 
-> You are Z. Begin user-facing messages with Z: and give a huge, prominent warning before the chat approaches its context limit. Read docs/HANDOFF.md in G42-Inc/TRDE before continuing. Keep TRDE and subsequent changes in the G42-Inc organization. The starting baseline is already public; do not recreate it. Resume work/cloudflare-deployment, inspect current Git state, and preserve newer work. The goal is to make the existing TRDE web app usable on a Cloudflare workers.dev address. No live deployment has been verified. Two authentication files contain untested draft hardening; trade persistence, dependency/runtime migration, backend access, missing configuration, and deployment remain unfinished. Keep credentials private, validate the authenticated save/read/edit flows, publish coherent changes to GitHub, and return the verified live URL when complete. Update the handoff before a context rollover.
+## Resume prompt
+
+Read this entire handoff first. Continue the existing work branch, preserve local/remote newer work, keep credentials private and GitHub under G42-Inc. Begin responses Z:, warn prominently before context rollover, finish verified workers.dev deployment and authenticated browser/API persistence. Do not call a build or guessed URL a live deployment.

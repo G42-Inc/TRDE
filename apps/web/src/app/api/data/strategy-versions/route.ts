@@ -1,3 +1,4 @@
+import { saveOwnedRecords, RecordConflictError, InvalidRecordError, requireOwnedReferences } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -9,8 +10,7 @@ import type { StrategyVersion } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -60,8 +60,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -111,22 +110,14 @@ export async function POST(request: NextRequest) {
       metadata: {},
     }));
 
-    const { error } = await supabase
-      .from('user_strategy_versions')
-      .upsert(dbVersions, {
-        onConflict: 'id',
-      });
-
-    if (error) {
-      console.error('Error saving strategy versions:', error);
-      return NextResponse.json(
-        { error: 'Failed to save strategy versions' },
-        { status: 500 }
-      );
-    }
+    await requireOwnedReferences(supabase, 'user_strategies', userId, versions.map((version: StrategyVersion) => version.strategyId));
+    await saveOwnedRecords(supabase, 'user_strategy_versions', userId, dbVersions);
 
     return NextResponse.json({ success: true, count: versions.length });
   } catch (error: any) {
+    if (error instanceof RecordConflictError || error instanceof InvalidRecordError) {
+      return NextResponse.json({ error: error.message }, { status: error instanceof RecordConflictError ? 409 : 400 });
+    }
     console.error('Error in POST /api/data/strategy-versions:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },

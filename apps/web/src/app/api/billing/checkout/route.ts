@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, getClerkUser } from '@/lib/auth/clerk';
-import Stripe from 'stripe';
+import { getClerkUserId, getClerkUser } from '@/lib/auth/clerk';
+import type Stripe from 'stripe';
+import { getStripeClient } from '@/lib/stripe/client';
 import type { PlanTier } from '@/lib/entitlements/types';
 import { getOrCreateStripeCustomer } from '@/lib/stripe/customer';
 import { getPriceId, validatePriceIds } from '@/lib/stripe/prices';
@@ -8,9 +9,6 @@ import { checkUserAccess } from '@/lib/auth/entitlements.server';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limit';
 import { CheckoutRequestSchema, validateBody } from '@/lib/validation/schemas';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-11-20.acacia' as any,
-});
 
 /**
  * POST /api/billing/checkout
@@ -42,19 +40,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get authenticated user - prioritize header from middleware to avoid auth() detection issues
-    let userId: string | null = request.headers.get('x-clerk-user-id');
-    
-    // Fallback to requireAuth if header not available
+    const userId = await getClerkUserId();
     if (!userId) {
-      try {
-        userId = await requireAuth();
-      } catch (error: any) {
-        return NextResponse.json(
-          { error: 'Unauthorized: Authentication required' },
-          { status: 401 }
-        );
-      }
+      return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
     
     // Get user details for email/name - but only if we can do it without errors
@@ -63,7 +51,7 @@ export async function POST(request: NextRequest) {
     let name: string | undefined;
     
     // Try to get user details, but don't fail if it doesn't work
-    // The userId from header is sufficient for checkout - email/name are optional
+    // The verified userId is sufficient for checkout - email/name are optional
     try {
       const user = await getClerkUser();
       if (user && user.id === userId) {
@@ -228,7 +216,7 @@ export async function POST(request: NextRequest) {
       sessionConfig.cancel_url = `${origin}/pricing?checkout=canceled`;
     }
 
-    const session = await stripe.checkout.sessions.create(sessionConfig);
+    const session = await getStripeClient().checkout.sessions.create(sessionConfig);
 
     // Return appropriate response based on mode
     if (mode === 'embedded') {

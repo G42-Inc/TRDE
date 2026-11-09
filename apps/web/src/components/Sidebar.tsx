@@ -103,7 +103,6 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
             onClick={onToggleCollapse}
             aria-label="Expand sidebar"
             className="sidebar-glass-toggle group"
-            aria-label="Expand sidebar"
           >
             <ChevronRightIcon className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5" style={{ color: 'var(--glass-text, var(--theme-text))' }} />
           </button>

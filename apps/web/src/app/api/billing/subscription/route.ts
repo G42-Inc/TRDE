@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/clerk';
+import { getClerkUserId } from '@/lib/auth/clerk';
 import { checkUserAccess } from '@/lib/auth/entitlements.server';
 
 /**
@@ -15,19 +15,9 @@ import { checkUserAccess } from '@/lib/auth/entitlements.server';
  */
 export async function GET(request: NextRequest) {
   try {
-    // Get authenticated user - prioritize header from middleware to avoid auth() detection issues
-    let userId: string | null = request.headers.get('x-clerk-user-id');
-    
-    // Fallback to requireAuth if header not available
+    const userId = await getClerkUserId();
     if (!userId) {
-      try {
-        userId = await requireAuth();
-      } catch (error: any) {
-        return NextResponse.json(
-          { error: 'Unauthorized: Authentication required' },
-          { status: 401 }
-        );
-      }
+      return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
     
     const accessCheck = await checkUserAccess(userId, 'basic');

@@ -1,3 +1,4 @@
+import { saveOwnedRecords, RecordConflictError, InvalidRecordError } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -9,8 +10,7 @@ import type { Collection } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -60,8 +60,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -111,22 +110,13 @@ export async function POST(request: NextRequest) {
       metadata: {},
     }));
 
-    const { error } = await supabase
-      .from('collections')
-      .upsert(dbCollections, {
-        onConflict: 'id',
-      });
-
-    if (error) {
-      console.error('Error saving collections:', error);
-      return NextResponse.json(
-        { error: 'Failed to save collections' },
-        { status: 500 }
-      );
-    }
+    await saveOwnedRecords(supabase, 'collections', userId, dbCollections);
 
     return NextResponse.json({ success: true, count: collections.length });
   } catch (error: any) {
+    if (error instanceof RecordConflictError || error instanceof InvalidRecordError) {
+      return NextResponse.json({ error: error.message }, { status: error instanceof RecordConflictError ? 409 : 400 });
+    }
     console.error('Error in POST /api/data/collections:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },

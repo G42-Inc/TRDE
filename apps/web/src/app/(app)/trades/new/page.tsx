@@ -149,11 +149,11 @@ export default function NewTradePage() {
         outcome = formData.importedOutcome || (resultUsd > 0.01 ? Outcome.WIN : resultUsd < -0.01 ? Outcome.LOSS : Outcome.BREAKEVEN);
       } else {
         // Calculate from prices (default behavior)
-        resultUsd = pointsPnL * 12.5 - (formData.importedFeesUsd || 10);
+        resultUsd = pointsPnL * 12.5 - (formData.importedFeesUsd ?? 10);
         outcome = resultUsd > 0.01 ? Outcome.WIN : resultUsd < -0.01 ? Outcome.LOSS : Outcome.BREAKEVEN;
       }
       
-      const resultR = resultUsd / formData.plannedRiskUsd;
+      const resultR = formData.plannedRiskUsd > 0 ? resultUsd / formData.plannedRiskUsd : 0;
 
       // Calculate discipline flags first
       const tempTrade = {
@@ -166,7 +166,7 @@ export default function NewTradePage() {
         exitTime,
         direction: formData.direction,
         quantity: formData.quantity,
-        feesUsd: formData.importedFeesUsd || 10,
+        feesUsd: formData.importedFeesUsd ?? 10,
         plannedRiskUsd: formData.plannedRiskUsd,
         resultUsd,
         resultR,
@@ -209,7 +209,8 @@ export default function NewTradePage() {
       const contractMultiplier = 100;
       const netPremiumPnLUsd = (formData.exitPremium - formData.entryPremium) * formData.quantity * contractMultiplier - 10;
       const resultUsd = netPremiumPnLUsd;
-      const resultR = resultUsd / (formData.entryPremium * formData.quantity * contractMultiplier);
+      const optionRisk = formData.entryPremium * formData.quantity * contractMultiplier;
+      const resultR = optionRisk > 0 ? resultUsd / optionRisk : 0;
       const outcome = resultR > 0.1 ? Outcome.WIN : resultR < -0.1 ? Outcome.LOSS : Outcome.BREAKEVEN;
 
       // Calculate discipline flags first
@@ -265,22 +266,26 @@ export default function NewTradePage() {
       newTrade = { ...tempTrade, disciplineFlags };
     }
 
-    const result = await saveTrades([...trades, newTrade]);
+    try {
+      const result = await saveTrades([...trades, newTrade]);
     
-    // Show notification if violations were detected
-    if (result.newViolations.length > 0) {
-      const violationCount = result.newViolations.length;
-      const violationNames = result.newViolations[0].violatedRules
-        .map(getViolationRuleName)
-        .join(', ');
-      showToast(
-        `Risk rule violation detected! ${violationCount} rule${violationCount > 1 ? 's' : ''} broken: ${violationNames}. Review in Risk tab.`,
-        'warning',
-        8000
-      );
+      // Show notification if violations were detected
+      if (result.newViolations.length > 0) {
+        const violationCount = result.newViolations.length;
+        const violationNames = result.newViolations[0].violatedRules
+          .map(getViolationRuleName)
+          .join(', ');
+        showToast(
+          `Risk rule violation detected! ${violationCount} rule${violationCount > 1 ? 's' : ''} broken: ${violationNames}. Review in Risk tab.`,
+          'warning',
+          8000
+        );
+      }
+    
+      router.push(`/trades/${newTrade.id}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to save trade. Please try again.', 'error');
     }
-    
-    router.push(`/trades/${newTrade.id}`);
   };
 
   const toggleSetupTag = (tag: SetupTag) => {

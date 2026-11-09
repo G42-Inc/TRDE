@@ -11,9 +11,7 @@ import { apiLogger } from '@/lib/utils/logger';
  */
 export async function GET(request: NextRequest) {
   try {
-    // First try to get userId from middleware header (most reliable)
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -83,10 +81,7 @@ export async function GET(request: NextRequest) {
  */
 export async function PUT(request: NextRequest) {
   try {
-    // First try to get userId from middleware header (most reliable)
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const clerkUserId = await getClerkUserId();
-    const userId = headerUserId || clerkUserId;
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(

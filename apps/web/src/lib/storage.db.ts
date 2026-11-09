@@ -28,6 +28,27 @@ import { detectViolationsFromTrade } from './violations';
 
 const API_BASE = '/api/data';
 
+const PAYLOAD_KEYS: Record<string, string> = {
+  'daily-biases': 'biases',
+  'quick-journals': 'journals',
+  'strategy-versions': 'versions',
+  'saved-filters': 'savedFilters',
+  'rule-violations': 'ruleViolations',
+  'weekly-reviews': 'weeklyReviews',
+  'dashboard-metrics': 'dashboardMetrics',
+};
+
+function payloadKey(endpoint: string): string {
+  const resource = endpoint.split('/').pop() || 'items';
+  return PAYLOAD_KEYS[resource] ?? resource;
+}
+
+async function responseError(response: Response): Promise<Error> {
+  if (response.status === 401) return new Error('Please sign in again to save your data.');
+  const body = await response.json().catch(() => null);
+  return new Error(typeof body?.error === 'string' ? body.error : `Request failed (${response.status})`);
+}
+
 /**
  * Fetch data from API endpoint
  */
@@ -36,32 +57,28 @@ async function fetchData<T>(endpoint: string): Promise<T[]> {
     credentials: 'include', // Include cookies for authentication
   });
   if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized - please sign in');
-    }
-    throw new Error(`Failed to fetch: ${response.statusText}`);
+    throw await responseError(response);
   }
   const data = await response.json();
-  return Object.values(data)[0] as T[]; // Extract first property (e.g., { trades: [...] })
+  const items = data[payloadKey(endpoint)];
+  if (!Array.isArray(items)) throw new Error('Invalid data response');
+  return items as T[];
 }
 
 /**
  * Save data to API endpoint
  */
-async function saveData<T>(endpoint: string, items: T[]): Promise<void> {
-  const key = endpoint.split('/').pop() || 'items';
+async function saveData<T>(endpoint: string, items: T[], extra: Record<string, unknown> = {}): Promise<void> {
+  const key = payloadKey(endpoint);
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ [key]: items }),
+    body: JSON.stringify({ [key]: items, ...extra }),
     credentials: 'include', // Include cookies for authentication
   });
   
   if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized - please sign in');
-    }
-    throw new Error(`Failed to save: ${response.statusText}`);
+    throw await responseError(response);
   }
 }
 
@@ -70,73 +87,73 @@ async function saveData<T>(endpoint: string, items: T[]): Promise<void> {
 // ============================================
 
 export async function getTrades(): Promise<Trade[]> {
-  try {
-    return await fetchData<Trade>(`${API_BASE}/trades`);
-  } catch (error) {
-    console.error('Error fetching trades:', error);
-    return [];
-  }
+  return await fetchData<Trade>(`${API_BASE}/trades`);
 }
 
-export async function saveTrades(trades: Trade[]): Promise<{ newViolations: RuleViolation[]; updatedViolations: RuleViolation[] }> {
-  // Automatically detect and create/update violations for trades with broken rules
-  const existingViolations = await getRuleViolations();
-  const violationsByTradeId = new Map(existingViolations.map(v => [v.tradeId, v]));
-  
+export async function saveTrades(trades: Trade[], deletedIds: string[] = []): Promise<{ newViolations: RuleViolation[]; updatedViolations: RuleViolation[] }> {
+  await saveData<Trade>(`${API_BASE}/trades`, trades, { deletedIds });
   const updatedViolations: RuleViolation[] = [];
   const newViolations: RuleViolation[] = [];
+  try {
+    // Automatically detect and create/update violations for trades with broken rules
+    const existingViolations = await getRuleViolations();
+    const violationsByTradeId = new Map(existingViolations.map(v => [v.tradeId, v]));
   
-  for (const trade of trades) {
-    const violatedRules = detectViolationsFromTrade(trade);
-    const existingViolation = violationsByTradeId.get(trade.id);
+
+    for (const trade of trades) {
+      const violatedRules = detectViolationsFromTrade(trade);
+      const existingViolation = violationsByTradeId.get(trade.id);
     
-    if (violatedRules.length > 0) {
-      if (existingViolation) {
-        const rulesChanged = JSON.stringify(existingViolation.violatedRules.sort()) !== JSON.stringify(violatedRules.sort());
+      if (violatedRules.length > 0) {
+        if (existingViolation) {
+          const rulesChanged = JSON.stringify(existingViolation.violatedRules.sort()) !== JSON.stringify(violatedRules.sort());
         
-        if (rulesChanged) {
-          updatedViolations.push({
-            ...existingViolation,
-            violatedRules,
-            reviewed: existingViolation.reviewed && violatedRules.every(r => existingViolation.violatedRules.includes(r)),
-            reviewedAt: existingViolation.reviewed ? existingViolation.reviewedAt : undefined,
-            reviewNotes: existingViolation.reviewed ? existingViolation.reviewNotes : undefined,
-          });
+          if (rulesChanged) {
+            updatedViolations.push({
+              ...existingViolation,
+              violatedRules,
+              reviewed: existingViolation.reviewed && violatedRules.every(r => existingViolation.violatedRules.includes(r)),
+              reviewedAt: existingViolation.reviewed ? existingViolation.reviewedAt : undefined,
+              reviewNotes: existingViolation.reviewed ? existingViolation.reviewNotes : undefined,
+            });
+          } else {
+            updatedViolations.push(existingViolation);
+          }
         } else {
-          updatedViolations.push(existingViolation);
+          newViolations.push({
+            id: `violation-${trade.id}-${Date.now()}`,
+            tradeId: trade.id,
+            violatedRules,
+            createdAt: trade.updatedAt || trade.createdAt,
+            reviewed: false,
+          });
         }
       } else {
-        newViolations.push({
-          id: `violation-${trade.id}-${Date.now()}`,
-          tradeId: trade.id,
-          violatedRules,
-          createdAt: trade.updatedAt || trade.createdAt,
-          reviewed: false,
-        });
-      }
-    } else {
-      if (existingViolation && existingViolation.reviewed) {
-        updatedViolations.push(existingViolation);
+        if (existingViolation && existingViolation.reviewed) {
+          updatedViolations.push(existingViolation);
+        }
       }
     }
-  }
-  
-  // Keep reviewed violations for trades that no longer exist
-  const tradeIds = new Set(trades.map(t => t.id));
-  for (const violation of existingViolations) {
-    if (violation.reviewed && !tradeIds.has(violation.tradeId)) {
-      updatedViolations.push(violation);
+
+    // Keep reviewed violations for trades that no longer exist
+    const tradeIds = new Set(trades.map(t => t.id));
+    for (const violation of existingViolations) {
+      if (violation.reviewed && !tradeIds.has(violation.tradeId)) {
+        updatedViolations.push(violation);
+      }
     }
+  
+    // Save violations
+    if (newViolations.length > 0 || updatedViolations.length > 0) {
+      await saveRuleViolations([...newViolations, ...updatedViolations]);
+    }
+  
+
+  } catch {
+    // The primary trade save succeeded. Risk summaries can be retried independently.
+    console.warn('Trades saved, but risk summaries could not be synchronized.');
   }
-  
-  // Save violations
-  if (newViolations.length > 0 || updatedViolations.length > 0) {
-    await saveRuleViolations([...newViolations, ...updatedViolations]);
-  }
-  
-  // Save trades
-  await saveData<Trade>(`${API_BASE}/trades`, trades);
-  
+
   return { newViolations, updatedViolations };
 }
 
@@ -145,12 +162,7 @@ export async function saveTrades(trades: Trade[]): Promise<{ newViolations: Rule
 // ============================================
 
 export async function getStrategies(): Promise<Strategy[]> {
-  try {
-    return await fetchData<Strategy>(`${API_BASE}/strategies`);
-  } catch (error) {
-    console.error('Error fetching strategies:', error);
-    return [];
-  }
+  return await fetchData<Strategy>(`${API_BASE}/strategies`);
 }
 
 export async function saveStrategies(strategies: Strategy[]): Promise<void> {
@@ -162,12 +174,7 @@ export async function saveStrategies(strategies: Strategy[]): Promise<void> {
 // ============================================
 
 export async function getVersions(): Promise<StrategyVersion[]> {
-  try {
-    return await fetchData<StrategyVersion>(`${API_BASE}/strategy-versions`);
-  } catch (error) {
-    console.error('Error fetching strategy versions:', error);
-    return [];
-  }
+  return await fetchData<StrategyVersion>(`${API_BASE}/strategy-versions`);
 }
 
 export async function saveVersions(versions: StrategyVersion[]): Promise<void> {
@@ -179,12 +186,7 @@ export async function saveVersions(versions: StrategyVersion[]): Promise<void> {
 // ============================================
 
 export async function getCollections(): Promise<Collection[]> {
-  try {
-    return await fetchData<Collection>(`${API_BASE}/collections`);
-  } catch (error) {
-    console.error('Error fetching collections:', error);
-    return [];
-  }
+  return await fetchData<Collection>(`${API_BASE}/collections`);
 }
 
 export async function saveCollections(collections: Collection[]): Promise<void> {
@@ -196,12 +198,7 @@ export async function saveCollections(collections: Collection[]): Promise<void> 
 // ============================================
 
 export async function getDailyBiases(): Promise<DailyBias[]> {
-  try {
-    return await fetchData<DailyBias>(`${API_BASE}/daily-biases`);
-  } catch (error) {
-    console.error('Error fetching daily biases:', error);
-    return [];
-  }
+  return await fetchData<DailyBias>(`${API_BASE}/daily-biases`);
 }
 
 export async function saveDailyBiases(biases: DailyBias[]): Promise<void> {
@@ -213,12 +210,7 @@ export async function saveDailyBiases(biases: DailyBias[]): Promise<void> {
 // ============================================
 
 export async function getQuickJournals(): Promise<DailyQuickJournal[]> {
-  try {
-    return await fetchData<DailyQuickJournal>(`${API_BASE}/quick-journals`);
-  } catch (error) {
-    console.error('Error fetching quick journals:', error);
-    return [];
-  }
+  return await fetchData<DailyQuickJournal>(`${API_BASE}/quick-journals`);
 }
 
 export async function saveQuickJournals(journals: DailyQuickJournal[]): Promise<void> {
@@ -230,12 +222,7 @@ export async function saveQuickJournals(journals: DailyQuickJournal[]): Promise<
 // ============================================
 
 export async function getSavedFilters(): Promise<SavedFilter[]> {
-  try {
-    return await fetchData<SavedFilter>(`${API_BASE}/saved-filters`);
-  } catch (error) {
-    console.error('Error fetching saved filters:', error);
-    return [];
-  }
+  return await fetchData<SavedFilter>(`${API_BASE}/saved-filters`);
 }
 
 export async function saveSavedFilters(filters: SavedFilter[]): Promise<void> {
@@ -274,10 +261,7 @@ export async function saveRiskRules(rules: RiskRules): Promise<void> {
   });
   
   if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized - please sign in');
-    }
-    throw new Error(`Failed to save: ${response.statusText}`);
+    throw await responseError(response);
   }
 }
 
@@ -286,12 +270,7 @@ export async function saveRiskRules(rules: RiskRules): Promise<void> {
 // ============================================
 
 export async function getJournals(): Promise<TradeJournal[]> {
-  try {
-    return await fetchData<TradeJournal>(`${API_BASE}/journals`);
-  } catch (error) {
-    console.error('Error fetching journals:', error);
-    return [];
-  }
+  return await fetchData<TradeJournal>(`${API_BASE}/journals`);
 }
 
 export async function saveJournals(journals: TradeJournal[]): Promise<void> {
@@ -303,12 +282,7 @@ export async function saveJournals(journals: TradeJournal[]): Promise<void> {
 // ============================================
 
 export async function getWeeklyReviews(): Promise<WeeklyReview[]> {
-  try {
-    return await fetchData<WeeklyReview>(`${API_BASE}/weekly-reviews`);
-  } catch (error) {
-    console.error('Error fetching weekly reviews:', error);
-    return [];
-  }
+  return await fetchData<WeeklyReview>(`${API_BASE}/weekly-reviews`);
 }
 
 export async function saveWeeklyReviews(reviews: WeeklyReview[]): Promise<void> {
@@ -320,12 +294,7 @@ export async function saveWeeklyReviews(reviews: WeeklyReview[]): Promise<void> 
 // ============================================
 
 export async function getTodos(): Promise<Todo[]> {
-  try {
-    return await fetchData<Todo>(`${API_BASE}/todos`);
-  } catch (error) {
-    console.error('Error fetching todos:', error);
-    return [];
-  }
+  return await fetchData<Todo>(`${API_BASE}/todos`);
 }
 
 export async function saveTodos(todos: Todo[]): Promise<void> {
@@ -337,12 +306,7 @@ export async function saveTodos(todos: Todo[]): Promise<void> {
 // ============================================
 
 export async function getRuleViolations(): Promise<RuleViolation[]> {
-  try {
-    return await fetchData<RuleViolation>(`${API_BASE}/rule-violations`);
-  } catch (error) {
-    console.error('Error fetching rule violations:', error);
-    return [];
-  }
+  return await fetchData<RuleViolation>(`${API_BASE}/rule-violations`);
 }
 
 export async function saveRuleViolations(violations: RuleViolation[]): Promise<void> {
@@ -400,10 +364,7 @@ export async function saveDashboardMetrics(metrics: DashboardMetricId[]): Promis
   });
   
   if (!response.ok) {
-    if (response.status === 401) {
-      throw new Error('Unauthorized - please sign in');
-    }
-    throw new Error(`Failed to save: ${response.statusText}`);
+    throw await responseError(response);
   }
 }
 
@@ -415,7 +376,7 @@ export async function clearAllData(): Promise<void> {
   // Clear all user data by calling each endpoint with empty arrays
   // This is a destructive operation - we continue even if individual calls fail
   const clearOperations = [
-    { name: 'trades', fn: () => saveData<Trade>(`${API_BASE}/trades`, []) },
+    { name: 'trades', fn: () => saveData<Trade>(`${API_BASE}/trades`, [], { clearAll: true }) },
     { name: 'strategies', fn: () => saveData<Strategy>(`${API_BASE}/strategies`, []) },
     { name: 'strategy-versions', fn: () => saveData<StrategyVersion>(`${API_BASE}/strategy-versions`, []) },
     { name: 'collections', fn: () => saveData<Collection>(`${API_BASE}/collections`, []) },

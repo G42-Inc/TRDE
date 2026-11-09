@@ -9,8 +9,7 @@ import type { DailyBias } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -63,8 +62,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(

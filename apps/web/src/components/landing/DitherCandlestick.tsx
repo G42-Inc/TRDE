@@ -1,7 +1,6 @@
 'use client';
 
 /* eslint-disable react/no-unknown-property */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';

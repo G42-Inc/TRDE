@@ -6,7 +6,7 @@
  * Conversion-optimized pricing with luxury design
  */
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useUser } from '@clerk/nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -104,7 +104,7 @@ const tiers: PricingTier[] = [
 ];
 
 
-export default function PricingPage() {
+function PricingPageContent() {
   const { user, isLoaded } = useUser();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -462,5 +462,13 @@ export default function PricingPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function PricingPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center" role="status">Loading…</div>}>
+      <PricingPageContent />
+    </Suspense>
   );
 }

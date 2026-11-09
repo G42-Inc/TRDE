@@ -10,20 +10,6 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Validate application configuration at startup
-// This runs once when the middleware module is loaded
-try {
-  // Only validate in production or when explicitly enabled
-  // In development, we allow missing env vars for flexibility
-  if (process.env.NODE_ENV === 'production' || process.env.VALIDATE_ENV === 'true') {
-    const { validateApplicationStartup } = require('@/lib/startup-validation');
-    validateApplicationStartup();
-  }
-} catch (error) {
-  // Log but don't crash - validation errors will show in logs
-  console.error('Startup validation error (non-fatal):', error);
-}
-
 /**
  * Public routes that don't require authentication
  */
@@ -85,13 +71,9 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   // This is required for server components to use auth() or currentUser()
   const { userId } = await auth();
 
-  // Never forward a caller-supplied identity, including on public routes and
-  // routes outside isProtectedRoute. Legacy handlers consume this header.
+  // Remove the legacy identity header. Handlers read Clerk's verified auth context.
   const requestHeaders = new Headers(req.headers);
   requestHeaders.delete('x-clerk-user-id');
-  if (userId) {
-    requestHeaders.set('x-clerk-user-id', userId);
-  }
 
   const next = () => NextResponse.next({
     request: { headers: requestHeaders },
@@ -103,7 +85,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   }
 
   // Protected routes require authentication
-  if (isProtectedRoute(req) && !userId) {
+  if ((pathname.startsWith('/api/') || isProtectedRoute(req)) && !userId) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
         { error: 'Unauthorized: Authentication required' },

@@ -42,7 +42,7 @@ const FEATURES: Feature[] = [
   },
 ];
 
-const ease = [0.25, 0.1, 0.25, 1.0];
+const ease: [number, number, number, number] = [0.25, 0.1, 0.25, 1.0];
 
 /* ── TiltFeatureCard ───────────────────────────────────────── */
 function TiltFeatureCard({ feature, index }: { feature: Feature; index: number }) {

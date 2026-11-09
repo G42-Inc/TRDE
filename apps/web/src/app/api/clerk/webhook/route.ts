@@ -15,14 +15,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { headers } from 'next/headers';
 import { Webhook } from 'svix';
 import { WebhookEvent } from '@clerk/nextjs/server';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
 import { queueWebhookRetry } from '@/lib/webhooks/retry-queue';
 import { handleUserCreated, handleUserUpdated, handleUserDeleted } from '@/lib/webhooks/clerk-handlers';
 
-const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
 
 /**
  * POST /api/clerk/webhook
@@ -30,6 +28,7 @@ const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
  * Handles Clerk webhook events
  */
 export async function POST(request: NextRequest) {
+  const webhookSecret = process.env.CLERK_WEBHOOK_SECRET;
   if (!webhookSecret) {
     console.error('CLERK_WEBHOOK_SECRET not configured');
     return NextResponse.json(
@@ -39,7 +38,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Get headers
-  const headersList = await headers();
+  const headersList = request.headers;
   const svixId = headersList.get('svix-id');
   const svixTimestamp = headersList.get('svix-timestamp');
   const svixSignature = headersList.get('svix-signature');
@@ -52,8 +51,8 @@ export async function POST(request: NextRequest) {
   }
 
   // Get the body
-  const payload = await request.json();
-  const body = JSON.stringify(payload);
+  // Signatures cover the original bytes, including whitespace and key order.
+  const body = await request.text();
 
   // Verify webhook signature
   const wh = new Webhook(webhookSecret);
@@ -111,9 +110,9 @@ export async function POST(request: NextRequest) {
       // Queue for retry
       await queueWebhookRetry({
         webhookType: 'clerk',
-        eventId: (event as any).id || `${Date.now()}`,
+        eventId: svixId,
         eventType: event.type,
-        eventData: payload,
+        eventData: event,
         error: error.message || 'Unknown error',
       });
 

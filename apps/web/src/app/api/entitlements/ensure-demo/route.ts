@@ -11,9 +11,7 @@ import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
 
 export async function POST(request: NextRequest) {
   try {
-    // Get userId from header (set by middleware) or from Clerk
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(

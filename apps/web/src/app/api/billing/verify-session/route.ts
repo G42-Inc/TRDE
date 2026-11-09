@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/clerk';
-import Stripe from 'stripe';
+import { getClerkUserId } from '@/lib/auth/clerk';
+import type Stripe from 'stripe';
+import { getStripeClient } from '@/lib/stripe/client';
 import { checkRateLimit, RATE_LIMITS } from '@/lib/utils/rate-limit';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-11-20.acacia' as any,
-});
 
 /**
  * GET /api/billing/verify-session
@@ -15,19 +13,9 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
  */
 export async function GET(request: NextRequest) {
   try {
-    // Get authenticated user - prioritize header from middleware to avoid auth() detection issues
-    let userId: string | null = request.headers.get('x-clerk-user-id');
-    
-    // Fallback to requireAuth if header not available
+    const userId = await getClerkUserId();
     if (!userId) {
-      try {
-        userId = await requireAuth();
-      } catch (error: any) {
-        return NextResponse.json(
-          { error: 'Unauthorized: Authentication required' },
-          { status: 401 }
-        );
-      }
+      return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
     const searchParams = request.nextUrl.searchParams;
     const sessionId = searchParams.get('session_id');
@@ -64,7 +52,7 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const session = await getStripeClient().checkout.sessions.retrieve(sessionId);
       
       // Check if session has expired (Stripe checkout sessions expire after 24 hours)
       const sessionAge = Date.now() - (session.created * 1000);

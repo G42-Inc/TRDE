@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
       try {
         if (userId) {
           // Direct user lookup by ID
-          const clerkUser = await clerkClient.users.getUser(userId);
+          const clerkUser = await (await clerkClient()).users.getUser(userId);
           if (clerkUser) {
             const profile = await getProfileFromSupabase(clerkUser.id);
             const entitlement = await getEntitlementFromSupabase(clerkUser.id);
@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
           }
         } else if (email) {
           // Search by email via Clerk
-          const clerkUsers = await clerkClient.users.getUserList({
+          const clerkUsers = await (await clerkClient()).users.getUserList({
             emailAddress: [email],
             limit: 20,
           });

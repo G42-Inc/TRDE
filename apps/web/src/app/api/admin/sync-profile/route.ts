@@ -1,3 +1,4 @@
+import { getClerkUserId } from '@/lib/auth/clerk';
 /**
  * Sync Profile API (POST)
  * 
@@ -39,9 +40,9 @@ export async function POST(request: NextRequest) {
       await requireAdmin(undefined, request);
       userId = targetUserId;
     } else {
-      // User syncing themselves - get userId from headers (set by middleware)
-      // DO NOT use currentUser() as it fails in API route contexts
-      userId = request.headers.get('x-clerk-user-id');
+      // Sync the authenticated user
+
+      userId = await getClerkUserId();
       
       if (!userId) {
         return NextResponse.json({ error: 'Unauthorized - no user ID in request' }, { status: 401 });
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       if (!userId) {
         return NextResponse.json({ error: 'userId is required' }, { status: 400 });
       }
-      clerkUser = await clerkClient.users.getUser(userId);
+      clerkUser = await (await clerkClient()).users.getUser(userId);
       if (!clerkUser) {
         return NextResponse.json({ error: 'User not found' }, { status: 404 });
       }
