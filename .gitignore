@@ -1,0 +1,27 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Generated builds and caches
+.next/
+dist/
+build/
+.expo/
+*.tsbuildinfo
+*.log
+*.sql.backup
+ios/Pods/
+android/.gradle/
+
+# Local editor and OS files
+.DS_Store
+.idea/
+.vscode/
