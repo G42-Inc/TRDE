@@ -5,15 +5,14 @@ import { useEffect, useRef } from 'react';
 /**
  * Welcome/Onboarding Layout
  * 
- * Full-screen luxury onboarding with the same looping video background
- * as the landing hero, white overlay "breath" at loop point,
+ * Full-screen luxury onboarding with a looping video background,
+ * white overlay "breath" at loop point,
  * and gold light leaks for atmospheric depth.
  * 
  * NOTE: No StorageProvider here - onboarding doesn't need user data.
  */
 
-/* ── Video paths (same as LandingHero) ────────────────────────── */
-const VIDEO_WEBM = '/video/trde-hero.webm';
+/* ── Existing optimized background media ─────────────────────── */
 const VIDEO_MP4 = '/video/trde-hero.mp4';
 const VIDEO_POSTER = '/video/trde-hero-poster.jpg';
 
@@ -33,7 +32,7 @@ export default function WelcomeLayout({
   const overlayRef = useRef<HTMLDivElement>(null);
   const leaksRef = useRef<HTMLDivElement>(null);
   const breathingRef = useRef(false);
-  const rafRef = useRef<number>(0);
+  const breathTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Force light theme
   useEffect(() => {
@@ -42,76 +41,66 @@ export default function WelcomeLayout({
     document.documentElement.style.colorScheme = 'light';
   }, []);
 
-  // Video loop breath effect — identical to LandingHero
+  // Native time updates are sufficient for the loop transition; avoid a
+  // continuous animation-frame poll while this decorative video is playing.
   useEffect(() => {
     const video = videoRef.current;
     const overlay = overlayRef.current;
     const leaks = leaksRef.current;
     if (!video || !overlay) return;
-
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-    const startLoop = () => {
-      if (mq.matches) {
-        video.pause();
-        return;
-      }
-
-      video.play().catch(() => {});
-
-      const poll = () => {
-        if (!video.duration || video.paused) {
-          rafRef.current = requestAnimationFrame(poll);
-          return;
-        }
-
-        const remaining = video.duration - video.currentTime;
-
-        // Ramp overlay up near loop point + intensify light leaks
-        if (!breathingRef.current && remaining <= BREATH_START) {
-          overlay.style.transition = `opacity ${BREATH_START * 1000}ms ease-in`;
-          overlay.style.opacity = String(OVERLAY_PEAK);
-          if (leaks) {
-            leaks.style.transition = `opacity ${BREATH_START * 1000}ms ease-in`;
-            leaks.style.opacity = '1';
-          }
-          breathingRef.current = true;
-        }
-
-        // After loop resets, hold briefly then fade back
-        if (breathingRef.current && video.currentTime < 1.0 && video.currentTime > 0.05) {
-          setTimeout(() => {
-            overlay.style.transition = `opacity ${BREATH_FADE}ms ease-out`;
-            overlay.style.opacity = String(OVERLAY_REST);
-            if (leaks) {
-              leaks.style.transition = `opacity ${BREATH_FADE}ms ease-out`;
-              leaks.style.opacity = '0.8';
-            }
-            breathingRef.current = false;
-          }, BREATH_HOLD);
-        }
-
-        rafRef.current = requestAnimationFrame(poll);
-      };
-
-      rafRef.current = requestAnimationFrame(poll);
+    const resetBreath = () => {
+      if (breathTimeoutRef.current) clearTimeout(breathTimeoutRef.current);
+      breathTimeoutRef.current = null;
+      breathingRef.current = false;
+      overlay.style.opacity = String(OVERLAY_REST);
+      if (leaks) leaks.style.opacity = '0.8';
     };
-
-    const handleMotionChange = () => {
-      cancelAnimationFrame(rafRef.current);
-      if (mq.matches) {
+    const syncPlayback = () => {
+      if (mq.matches || document.hidden) {
         video.pause();
+        resetBreath();
       } else {
-        startLoop();
+        video.play().catch(() => {});
+      }
+    };
+    const handleTimeUpdate = () => {
+      if (video.paused || !Number.isFinite(video.duration)) return;
+      const remaining = video.duration - video.currentTime;
+      if (!breathingRef.current && remaining <= BREATH_START) {
+        overlay.style.transition = `opacity ${BREATH_START * 1000}ms ease-in`;
+        overlay.style.opacity = String(OVERLAY_PEAK);
+        if (leaks) {
+          leaks.style.transition = `opacity ${BREATH_START * 1000}ms ease-in`;
+          leaks.style.opacity = '1';
+        }
+        breathingRef.current = true;
+      }
+      if (breathingRef.current && video.currentTime < 1 && video.currentTime > 0.05) {
+        breathingRef.current = false;
+        breathTimeoutRef.current = setTimeout(() => {
+          overlay.style.transition = `opacity ${BREATH_FADE}ms ease-out`;
+          overlay.style.opacity = String(OVERLAY_REST);
+          if (leaks) {
+            leaks.style.transition = `opacity ${BREATH_FADE}ms ease-out`;
+            leaks.style.opacity = '0.8';
+          }
+          breathTimeoutRef.current = null;
+        }, BREATH_HOLD);
       }
     };
 
-    startLoop();
-    mq.addEventListener('change', handleMotionChange);
-
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    document.addEventListener('visibilitychange', syncPlayback);
+    mq.addEventListener('change', syncPlayback);
+    syncPlayback();
     return () => {
-      cancelAnimationFrame(rafRef.current);
-      mq.removeEventListener('change', handleMotionChange);
+      video.pause();
+      resetBreath();
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      document.removeEventListener('visibilitychange', syncPlayback);
+      mq.removeEventListener('change', syncPlayback);
     };
   }, []);
 
@@ -128,17 +117,14 @@ export default function WelcomeLayout({
       <div className="fixed inset-0 z-0">
         <video
           ref={videoRef}
-          autoPlay
           muted
           loop
           playsInline
-          preload="metadata"
+          preload="none"
+          src={VIDEO_MP4}
           poster={VIDEO_POSTER}
           className="absolute inset-0 h-full w-full object-cover"
-        >
-          <source src={VIDEO_WEBM} type="video/webm" />
-          <source src={VIDEO_MP4} type="video/mp4" />
-        </video>
+        />
 
         {/* White overlay — pulses at loop point to mask stutter */}
         <div
@@ -198,18 +184,6 @@ export default function WelcomeLayout({
         />
       </div>
 
-      {/* ── Poster fallback for reduced-motion ────────────────── */}
-      <div
-        className="fixed inset-0 z-0 pointer-events-none"
-        style={{
-          backgroundImage: `url(${VIDEO_POSTER})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          opacity: 0,
-        }}
-        aria-hidden="true"
-      />
-      
       {/* ── Content ───────────────────────────────────────────── */}
       <div className="relative z-10">
         {children}

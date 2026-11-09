@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
 interface NavItem {
@@ -17,33 +16,59 @@ interface NavDropdownProps {
 
 export function NavDropdown({ label, items }: NavDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const panelId = useId();
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const focusTargetRef = useRef<'first' | 'last' | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleMouseEnter = () => {
+  const clearCloseTimer = () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+  };
+
+  const close = () => {
+    clearCloseTimer();
+    focusTargetRef.current = null;
+    setIsOpen(false);
+  };
+
+  const handleMouseEnter = () => {
+    clearCloseTimer();
     setIsOpen(true);
   };
 
   const handleMouseLeave = () => {
+    clearCloseTimer();
     timeoutRef.current = setTimeout(() => {
-      setIsOpen(false);
+      // Pointer movement must not remove links while a keyboard user is in them.
+      if (!dropdownRef.current?.contains(document.activeElement)) {
+        setIsOpen(false);
+      }
     }, 200);
   };
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
+    if (!isOpen || !focusTargetRef.current) return;
+    const links = dropdownRef.current?.querySelectorAll<HTMLAnchorElement>('a[href]');
+    const target = focusTargetRef.current === 'last' ? links?.[links.length - 1] : links?.[0];
+    target?.focus();
+    focusTargetRef.current = null;
+  }, [isOpen]);
+
+  useEffect(() => {
+    function handleClickOutside(event: PointerEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        focusTargetRef.current = null;
         setIsOpen(false);
       }
     }
 
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('pointerdown', handleClickOutside);
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handleClickOutside);
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -56,50 +81,68 @@ export function NavDropdown({ label, items }: NavDropdownProps) {
       className="relative"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && isOpen) {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+          triggerRef.current?.focus();
+        }
+      }}
     >
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-gray-700 hover:text-black transition-colors duration-300"
+        ref={triggerRef}
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        onClick={() => {
+          clearCloseTimer();
+          setIsOpen((open) => !open);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+          event.preventDefault();
+          clearCloseTimer();
+          const target = event.key === 'ArrowUp' ? 'last' : 'first';
+          if (isOpen) {
+            const links = dropdownRef.current?.querySelectorAll<HTMLAnchorElement>('a[href]');
+            (target === 'last' ? links?.[links.length - 1] : links?.[0])?.focus();
+          } else {
+            focusTargetRef.current = target;
+            setIsOpen(true);
+          }
+        }}
+        className="flex min-h-11 items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-gray-700 hover:text-black transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 motion-reduce:transition-none"
       >
         {label}
-        <motion.div
-          animate={{ rotate: isOpen ? 180 : 0 }}
-          transition={{ duration: 0.3, ease: "easeInOut" }}
-        >
-          <ChevronDownIcon className="w-4 h-4" />
-        </motion.div>
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={`h-4 w-4 transition-transform duration-150 motion-reduce:transition-none ${isOpen ? 'rotate-180' : ''}`}
+        />
       </button>
 
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="absolute top-full left-0 mt-3 w-56 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-2xl border border-gray-200/50 overflow-hidden z-50"
-          >
-            <div className="py-2">
-              {items.map((item, index) => (
-                <motion.div
-                  key={`${item.label}-${item.href}-${index}`}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.05, duration: 0.2 }}
-                >
-                  <Link
-                    href={item.href}
-                    onClick={() => setIsOpen(false)}
-                    className="block px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black transition-all duration-200"
-                  >
-                    {item.label}
-                  </Link>
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div
+        id={panelId}
+        hidden={!isOpen}
+        className="absolute top-full left-0 mt-3 w-56 bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden z-50"
+      >
+        <ul className="py-2">
+          {items.map((item, index) => (
+            <li key={`${item.label}-${item.href}-${index}`}>
+              <Link
+                href={item.href}
+                onClick={close}
+                className="block min-h-11 px-5 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-black focus-visible:bg-gray-100 focus-visible:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-black"
+              >
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

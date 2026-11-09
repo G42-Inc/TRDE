@@ -1,10 +1,18 @@
 'use client';
 
 import { useState, useCallback, createContext, useContext, ReactNode } from 'react';
-import { CommandPalette } from './CommandPalette';
-import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
+import dynamic from 'next/dynamic';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePathname } from 'next/navigation';
+
+const CommandPalette = dynamic(
+  () => import('./CommandPalette').then((module) => module.CommandPalette),
+  { ssr: false },
+);
+const KeyboardShortcutsHelp = dynamic(
+  () => import('./KeyboardShortcutsHelp').then((module) => module.KeyboardShortcutsHelp),
+  { ssr: false },
+);
 
 interface GlobalUIContextType {
   openCommandPalette: () => void;
@@ -33,10 +41,18 @@ export function GlobalProviders({ children }: GlobalProvidersProps) {
   const pathname = usePathname();
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isShortcutsHelpOpen, setIsShortcutsHelpOpen] = useState(false);
+  const [hasOpenedCommandPalette, setHasOpenedCommandPalette] = useState(false);
+  const [hasOpenedShortcutsHelp, setHasOpenedShortcutsHelp] = useState(false);
 
-  const openCommandPalette = useCallback(() => setIsCommandPaletteOpen(true), []);
+  const openCommandPalette = useCallback(() => {
+    setHasOpenedCommandPalette(true);
+    setIsCommandPaletteOpen(true);
+  }, []);
   const closeCommandPalette = useCallback(() => setIsCommandPaletteOpen(false), []);
-  const openShortcutsHelp = useCallback(() => setIsShortcutsHelpOpen(true), []);
+  const openShortcutsHelp = useCallback(() => {
+    setHasOpenedShortcutsHelp(true);
+    setIsShortcutsHelpOpen(true);
+  }, []);
   const closeShortcutsHelp = useCallback(() => setIsShortcutsHelpOpen(false), []);
 
   // Check if we're on a dashboard route
@@ -71,18 +87,18 @@ export function GlobalProviders({ children }: GlobalProvidersProps) {
     >
       {children}
       
-      {/* Global UI Components - only render on dashboard routes */}
-      {isDashboardRoute && (
-        <>
-          <CommandPalette 
-            isOpen={isCommandPaletteOpen} 
-            onClose={closeCommandPalette} 
-          />
-          <KeyboardShortcutsHelp 
-            isOpen={isShortcutsHelpOpen} 
-            onClose={closeShortcutsHelp} 
-          />
-        </>
+      {/* Load on first use, then retain the dialogs for their exit animations. */}
+      {isDashboardRoute && hasOpenedCommandPalette && (
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          onClose={closeCommandPalette}
+        />
+      )}
+      {isDashboardRoute && hasOpenedShortcutsHelp && (
+        <KeyboardShortcutsHelp
+          isOpen={isShortcutsHelpOpen}
+          onClose={closeShortcutsHelp}
+        />
       )}
     </GlobalUIContext.Provider>
   );
