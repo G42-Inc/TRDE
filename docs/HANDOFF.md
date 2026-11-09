@@ -4,6 +4,8 @@ Updated by Z on November 9, 2026 (America/New_York).
 
 **Live URL: https://trde.rr-seshify.workers.dev**
 
+For transfer to Murakami, start with [MURAKAMI_HANDOFF.md](MURAKAMI_HANDOFF.md): it provides a portable setup sequence, remaining tasks and a paste-ready continuation prompt.
+
 The existing web app is live and verified. Authenticated API persistence, provider webhooks and browser create/read/edit/reload passed, and the user confirmed their real login works. The latest release repairs journal workflows, analytics and responsive navigation on desktop and phone browsers. The earlier landing/media improvements remain deployed. See the audit evidence below.
 
 ## Journal audit — November 9, 2026
@@ -73,7 +75,7 @@ Clerk and Stripe retain the existing **development/test** configuration. No prod
 - Web runtime pinned to Next 15.5.29, React/DOM 19.3.1, Clerk 6.39.8, OpenNext 1.20.16 and Wrangler 4.158.0. Graphics/UI peers updated. Panels pinned to 4.3.0 for Next 15 compatibility. Node 24.22.1 and pnpm 11.25.0 recorded with lockfile. Mobile manifests unchanged.
 - Verified Clerk sessions/metadata replace unsigned identity headers, decoded JWT payloads and admin cookies. Mobile Bearer verification, signed public webhooks, API 401/page redirects and fail-closed retry authorization are covered.
 - Trades use actual core/UI contracts (uppercase enums, text IDs, epoch timestamps, grades, attachments, zero values). All global-ID data writes use ownership-safe insert/update; related journals/versions validate owner references. Explicit deletion avoids wiping cloud data from empty caches. Save failures reach forms, successful empty fetches clear caches, and account changes invalidate stale requests.
-- Fresh accounts can save/edit with **No strategy**. Forms use local calendar defaults and functional field updates. The edit form loads one owned snapshot per account/trade, hides inputs until ready, retains the original calculation baseline, and cancels stale loads. Background cache/cloud replacement no longer overwrites unsaved typing. Load failures offer Retry/Back; demo trades remain read-only.
+- Fresh non-demo accounts with journal access can save/edit with **No strategy**. Forms use local calendar defaults and functional field updates. The edit form loads one owned snapshot per account/trade, hides inputs until ready, retains the original calculation baseline, and cancels stale loads. Background cache/cloud replacement no longer overwrites unsaved typing. Load failures offer Retry/Back; demo trades remain read-only.
 - Shared calculations use verified contract tick size/value for 12 common futures, with visible custom tick fields for other symbols. Options honor long/short, fees, planned risk and multiplier. Zero fees/risk are preserved. Review-only edits retain original P&L and precise/overnight timestamps; fee/risk changes adjust only the relevant calculations. **No existing saved financial records are automatically migrated.**
 - Stripe uses fetch and asynchronous Web Crypto signature verification. Config and encryption keys resolve lazily. The jsdom dependency and ProjectX credential/response logging were removed. CSP supports configured Clerk domains.
 - Stripe failed-event replay now retries, clears failure on success and deduplicates successful events; retry payloads support current and legacy shapes. Clerk user.created initializes missing rows only, preserving paid access, preferences, XP and newer profile data on replay.
@@ -113,7 +115,7 @@ Clerk endpoint: `/api/clerk/webhook`, user.created/updated/deleted. Stripe TEST 
 
 ## Acceptance fixtures and cleanup
 
-The opt-in script `apps/web/scripts/acceptance.mjs` creates only marked Clerk test users and comped fixtures, never impersonates existing users or prints JWTs. Addresses use +clerk_test. Private fixture state is written to `/tmp/trde-e2e-acceptance.json` only while a test run is active. Reuse verifies matching private metadata; cleanup revokes sessions and removes only marked users/records.
+The opt-in script `apps/web/scripts/acceptance.mjs` creates only marked Clerk test users and comped fixtures, never impersonates existing users or prints JWTs. Addresses use +clerk_test. Private fixture state is written to `/tmp/trde-e2e-acceptance.json` only while a test run is active. Reuse verifies matching private metadata. The built-in cleanup handles five explicitly listed tables and the recorded session; broad browser QA needs additional marker-verified cleanup for every owned fixture table and active session. The comprehensive cleanup reported below was performed separately.
 
 Latest journal-audit cleanup passed: exactly two marked Clerk acceptance accounts removed, three active sessions revoked, 40 directly owned rows removed, and zero owned records remaining across 30 user-data tables, including browser-created trades and final analytics fixtures. Both deleted accounts return 404. The private fixture-state file was removed. The local preview processes started for this task were stopped. The user's ignored private configuration files are retained. The temporary deployment secret JSON was removed after final deployment.
 

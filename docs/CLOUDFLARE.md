@@ -14,12 +14,14 @@ current acceptance checkpoint and outstanding work.
 | Correct contract calculations, preserve imported history, and safe Clerk replay | `d3040c54c72ab9abe0f56b36ae91ba91301f2be8` | `f41c9a33-ff74-4a5a-aea6-4e79e7275893` |
 | Preserve unsaved drafts during background refresh | `7178054f0415c159cf7cc361c66b883ea930a8e7` | `5794e405-0cce-458c-ad73-00c480276bb9` |
 | Landing, navigation, media and static-cache improvements | `f2e57cb1ab6ba7812015f2f5083c690f596edd6d` | `60fb50ab-e44b-4f2e-83a8-1aee9e5f0434` |
+| Journal workflow, responsive navigation and analytics audit | `0e40907dabe07638ac351113df0a495060d962b0` | `3067edb0-f14a-4b5b-88fb-93b5346204cb` |
 
-The fifth version is live and passes 55 focused tests, production builds, type
-validation and artifact secret scans. The journal deployment was verified with
-nine authenticated API acceptance groups, signed webhook/replay checks and browser
-create/edit/reload/sign-out flows. The fifth version preserves those APIs and
-adds the verified landing/media/static-cache improvements documented below.
+The latest journal-audit version is live and passes 93 regression tests, production
+builds, type validation and artifact secret scans. Its nine real Clerk-token
+acceptance groups passed again on the final live Worker. Extended feature and
+Settings API checks, browser save/edit/reload and desktop/mobile route coverage
+are documented in `JOURNAL_QA.md`. Earlier signed provider webhook/replay checks
+and landing/media improvements remain recorded in `HANDOFF.md`.
 
 ## Build and preview
 
@@ -59,6 +61,7 @@ applying migrations. Keep Stripe test and live credentials distinct.
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Build and runtime | Browser authentication, Clerk public host in CSP |
 | `CLERK_SECRET_KEY` | Runtime | Session and user verification |
 | `CLERK_WEBHOOK_SECRET` | Runtime | Verify `/api/clerk/webhook` deliveries |
+| `WEBHOOK_RETRY_API_KEY` | Runtime secret | Authorize webhook retry processing |
 | `NEXT_PUBLIC_SUPABASE_URL` | Build and runtime | Application database endpoint |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Build and runtime | Public Supabase client configuration |
 | `SUPABASE_SERVICE_ROLE_KEY` | Runtime secret | Server data access; never expose to the browser |
@@ -157,7 +160,7 @@ not by themselves verify real payments or every subscription lifecycle case.
 ## Verified status and limits
 
 The production Next/OpenNext builds, type checks, and artifact secret scans passed.
-The current deployed build compressed to 2,440.98 KiB. Its landing page returned
+The current deployed build compressed to 2461.26 KiB. Its landing page returned
 HTTP 200; signed-out and forged-header trade API requests returned HTTP 401.
 Nine acceptance groups using real Clerk tokens passed on the live URL, covering
 authenticated data save/read/edit and account isolation. Signed synthetic Stripe
@@ -183,8 +186,10 @@ The temporary deployment binding map was deleted; ignored local configuration is
 retained privately. No task preview server remains running.
 
 This is a fresh dedicated database. No historical records were migrated from the
-original inaccessible backend. Test-mode identity/billing, optional broker
-connections, legacy analytics, and mobile are not production certification.
+original inaccessible backend. Production identity/billing, provider-backed broker connections and the native
+Expo app remain separate work. Responsive web and analytics verification are
+covered by the completed journal audit; they are not exhaustive device or field
+performance certification.
 Both webhook signing secrets are configured privately. Changing public backend
 configuration requires a fresh build; rotating stored-data encryption keys
 requires a separate migration plan.
