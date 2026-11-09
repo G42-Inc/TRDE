@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { addDays, format } from 'date-fns';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAppData } from '@/hooks/useAppData';
 import { AssetClass, Direction, Grade, Outcome, Session, MarketRegime, MarketHoursTag, SetupTag, NewsTag, RthEth, FuturesInstrument, OptionsUnderlying, OptionType, FUTURES_GROUPS } from '@trde/core';
@@ -20,7 +21,7 @@ export default function NewTradePage() {
   const [mounted, setMounted] = useState(false);
   const [assetClass, setAssetClass] = useState<AssetClass>(AssetClass.FUTURES);
   const [formData, setFormData] = useState({
-    tradeDate: new Date().toISOString().split('T')[0],
+    tradeDate: format(new Date(), 'yyyy-MM-dd'),
     entryTime: '09:30',
     exitTime: '10:30',
     direction: Direction.LONG,
@@ -43,7 +44,7 @@ export default function NewTradePage() {
     underlying: OptionsUnderlying.SPY,
     strike: 400,
     optionType: OptionType.CALL,
-    expiration: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    expiration: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
     entryPremium: 5,
     exitPremium: 6,
     // Imported data (optional)
@@ -51,6 +52,10 @@ export default function NewTradePage() {
     importedFeesUsd: undefined as number | undefined,
     importedOutcome: undefined as Outcome | undefined,
   });
+
+  const updateFormData = (changes: Partial<typeof formData>) => {
+    setFormData((previous) => ({ ...previous, ...changes }));
+  };
 
   useEffect(() => {
     // Add a small delay to ensure skeleton loader is visible
@@ -289,12 +294,12 @@ export default function NewTradePage() {
   };
 
   const toggleSetupTag = (tag: SetupTag) => {
-    setFormData({
-      ...formData,
-      setupTags: formData.setupTags.includes(tag)
-        ? formData.setupTags.filter((t) => t !== tag)
-        : [...formData.setupTags, tag],
-    });
+    setFormData((previous) => ({
+      ...previous,
+      setupTags: previous.setupTags.includes(tag)
+        ? previous.setupTags.filter((t) => t !== tag)
+        : [...previous.setupTags, tag],
+    }));
   };
 
   return (
@@ -389,7 +394,7 @@ export default function NewTradePage() {
               <input
                 type="date"
                 value={formData.tradeDate}
-                onChange={(e) => setFormData({ ...formData, tradeDate: e.target.value })}
+                onChange={(e) => updateFormData({ tradeDate: e.target.value })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                 required
               />
@@ -401,7 +406,7 @@ export default function NewTradePage() {
                 <input
                   type="time"
                   value={formData.entryTime}
-                  onChange={(e) => setFormData({ ...formData, entryTime: e.target.value })}
+                  onChange={(e) => updateFormData({ entryTime: e.target.value })}
                   className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                   required
                 />
@@ -411,7 +416,7 @@ export default function NewTradePage() {
                 <input
                   type="time"
                   value={formData.exitTime}
-                  onChange={(e) => setFormData({ ...formData, exitTime: e.target.value })}
+                  onChange={(e) => updateFormData({ exitTime: e.target.value })}
                   className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                   required
                 />
@@ -423,7 +428,7 @@ export default function NewTradePage() {
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, direction: Direction.LONG })}
+                  onClick={() => updateFormData({ direction: Direction.LONG })}
                   className={`px-5 py-3 rounded-xl font-semibold transition-all duration-300 ${
                     formData.direction === Direction.LONG
                       ? 'theme-text shadow-lg scale-[1.02]'
@@ -445,7 +450,7 @@ export default function NewTradePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, direction: Direction.SHORT })}
+                  onClick={() => updateFormData({ direction: Direction.SHORT })}
                   className={`px-5 py-3 rounded-xl font-semibold transition-all duration-300 ${
                     formData.direction === Direction.SHORT
                       ? 'theme-text shadow-lg scale-[1.02]'
@@ -473,7 +478,7 @@ export default function NewTradePage() {
               <input
                 type="number"
                 value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
+                onChange={(e) => updateFormData({ quantity: parseInt(e.target.value) || 1 })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                 required
                 min="1"
@@ -485,7 +490,7 @@ export default function NewTradePage() {
               <input
                 type="number"
                 value={formData.plannedRiskUsd}
-                onChange={(e) => setFormData({ ...formData, plannedRiskUsd: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => updateFormData({ plannedRiskUsd: parseFloat(e.target.value) || 0 })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                 required
                 min="0"
@@ -509,7 +514,7 @@ export default function NewTradePage() {
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Instrument</label>
                   <select
                     value={formData.instrumentRoot}
-                    onChange={(e) => setFormData({ ...formData, instrumentRoot: e.target.value as FuturesInstrument })}
+                    onChange={(e) => updateFormData({ instrumentRoot: e.target.value as FuturesInstrument })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     required
                   >
@@ -556,7 +561,7 @@ export default function NewTradePage() {
                     <input
                       type="number"
                       value={formData.entryPrice}
-                      onChange={(e) => setFormData({ ...formData, entryPrice: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ entryPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                       step="0.01"
                     />
@@ -566,7 +571,7 @@ export default function NewTradePage() {
                     <input
                       type="number"
                       value={formData.exitPrice}
-                      onChange={(e) => setFormData({ ...formData, exitPrice: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ exitPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                       step="0.01"
                     />
@@ -579,7 +584,7 @@ export default function NewTradePage() {
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Underlying</label>
                   <select
                     value={formData.underlying}
-                    onChange={(e) => setFormData({ ...formData, underlying: e.target.value as OptionsUnderlying })}
+                    onChange={(e) => updateFormData({ underlying: e.target.value as OptionsUnderlying })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     required
                   >
@@ -594,7 +599,7 @@ export default function NewTradePage() {
                     <input
                       type="number"
                       value={formData.strike}
-                      onChange={(e) => setFormData({ ...formData, strike: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ strike: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                       step="0.01"
                     />
@@ -603,7 +608,7 @@ export default function NewTradePage() {
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Type</label>
                     <select
                       value={formData.optionType}
-                      onChange={(e) => setFormData({ ...formData, optionType: e.target.value as OptionType })}
+                      onChange={(e) => updateFormData({ optionType: e.target.value as OptionType })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     >
                       <option value={OptionType.CALL}>Call</option>
@@ -617,7 +622,7 @@ export default function NewTradePage() {
                     <input
                       type="date"
                       value={formData.expiration}
-                      onChange={(e) => setFormData({ ...formData, expiration: e.target.value })}
+                      onChange={(e) => updateFormData({ expiration: e.target.value })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     />
                   </div>
@@ -626,7 +631,7 @@ export default function NewTradePage() {
                     <input
                       type="number"
                       value={formData.entryPremium}
-                      onChange={(e) => setFormData({ ...formData, entryPremium: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ entryPremium: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                       step="0.01"
                     />
@@ -637,7 +642,7 @@ export default function NewTradePage() {
                   <input
                     type="number"
                     value={formData.exitPremium}
-                    onChange={(e) => setFormData({ ...formData, exitPremium: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => updateFormData({ exitPremium: parseFloat(e.target.value) || 0 })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     step="0.01"
                   />
@@ -646,14 +651,13 @@ export default function NewTradePage() {
             )}
 
             <div>
-              <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy</label>
+              <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy (optional)</label>
               <select
                 value={formData.strategyId}
-                onChange={(e) => setFormData({ ...formData, strategyId: e.target.value, strategyVersionId: '' })}
+                onChange={(e) => updateFormData({ strategyId: e.target.value, strategyVersionId: '' })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                required
               >
-                <option value="">Select Strategy</option>
+                <option value="">No strategy</option>
                 {strategies.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -662,14 +666,13 @@ export default function NewTradePage() {
 
             {strategyVersions.length > 0 && (
               <div>
-                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy Version</label>
+                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy Version (optional)</label>
                 <select
                   value={formData.strategyVersionId}
-                  onChange={(e) => setFormData({ ...formData, strategyVersionId: e.target.value })}
+                  onChange={(e) => updateFormData({ strategyVersionId: e.target.value })}
                   className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                  required
                 >
-                  <option value="">Select Version</option>
+                  <option value="">No version</option>
                   {strategyVersions.map((v) => (
                     <option key={v.id} value={v.id}>{v.version}</option>
                   ))}
@@ -681,7 +684,7 @@ export default function NewTradePage() {
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Grade</label>
               <select
                 value={formData.grade}
-                onChange={(e) => setFormData({ ...formData, grade: e.target.value as Grade })}
+                onChange={(e) => updateFormData({ grade: e.target.value as Grade })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
               >
                 <option value={Grade.A_PLUS}>A+</option>
@@ -741,7 +744,7 @@ export default function NewTradePage() {
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Session</label>
             <select
               value={formData.session}
-              onChange={(e) => setFormData({ ...formData, session: e.target.value as Session })}
+              onChange={(e) => updateFormData({ session: e.target.value as Session })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
             >
               {Object.values(Session).map((session) => (
@@ -753,7 +756,7 @@ export default function NewTradePage() {
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Market Regime</label>
             <select
               value={formData.marketRegime}
-              onChange={(e) => setFormData({ ...formData, marketRegime: e.target.value as MarketRegime })}
+              onChange={(e) => updateFormData({ marketRegime: e.target.value as MarketRegime })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
             >
               {Object.values(MarketRegime).map((regime) => (
@@ -765,7 +768,7 @@ export default function NewTradePage() {
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Market Hours</label>
             <select
               value={formData.marketHoursTag}
-              onChange={(e) => setFormData({ ...formData, marketHoursTag: e.target.value as MarketHoursTag })}
+              onChange={(e) => updateFormData({ marketHoursTag: e.target.value as MarketHoursTag })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
             >
               {Object.values(MarketHoursTag).map((hours) => (
@@ -780,7 +783,7 @@ export default function NewTradePage() {
           <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Notes</label>
           <textarea
             value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            onChange={(e) => updateFormData({ notes: e.target.value })}
             className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium resize-none"
             rows={5}
             placeholder="Add any additional notes about this trade..."
@@ -790,7 +793,7 @@ export default function NewTradePage() {
         {/* Screenshots */}
         <ImageUpload
           attachments={formData.attachments}
-          onAttachmentsChange={(attachments) => setFormData({ ...formData, attachments })}
+          onAttachmentsChange={(attachments) => updateFormData({ attachments })}
           maxImages={10}
         />
 

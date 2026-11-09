@@ -52,6 +52,10 @@ export default function EditTradePage() {
     exitPremium: 0,
   });
 
+  const updateFormData = (changes: Partial<typeof formData>) => {
+    setFormData((previous) => ({ ...previous, ...changes }));
+  };
+
   useEffect(() => {
     // Add a small delay to ensure skeleton loader is visible
     const timer = setTimeout(() => {
@@ -257,12 +261,12 @@ export default function EditTradePage() {
   };
 
   const toggleSetupTag = (tag: SetupTag) => {
-    setFormData({
-      ...formData,
-      setupTags: formData.setupTags.includes(tag)
-        ? formData.setupTags.filter((t) => t !== tag)
-        : [...formData.setupTags, tag],
-    });
+    setFormData((previous) => ({
+      ...previous,
+      setupTags: previous.setupTags.includes(tag)
+        ? previous.setupTags.filter((t) => t !== tag)
+        : [...previous.setupTags, tag],
+    }));
   };
 
   if (!trade) {
@@ -324,7 +328,7 @@ export default function EditTradePage() {
               <input
                 type="date"
                 value={formData.tradeDate}
-                onChange={(e) => setFormData({ ...formData, tradeDate: e.target.value })}
+                onChange={(e) => updateFormData({ tradeDate: e.target.value })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                 required
               />
@@ -336,7 +340,7 @@ export default function EditTradePage() {
                 <input
                   type="time"
                   value={formData.entryTime}
-                  onChange={(e) => setFormData({ ...formData, entryTime: e.target.value })}
+                  onChange={(e) => updateFormData({ entryTime: e.target.value })}
                   className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                   required
                 />
@@ -346,7 +350,7 @@ export default function EditTradePage() {
                 <input
                   type="time"
                   value={formData.exitTime}
-                  onChange={(e) => setFormData({ ...formData, exitTime: e.target.value })}
+                  onChange={(e) => updateFormData({ exitTime: e.target.value })}
                   className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                   required
                 />
@@ -358,7 +362,7 @@ export default function EditTradePage() {
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, direction: Direction.LONG })}
+                  onClick={() => updateFormData({ direction: Direction.LONG })}
                   className={`px-4 py-2 rounded-lg border-2 transition-colors ${
                     formData.direction === Direction.LONG
                       ? 'bg-accent border-accent text-white'
@@ -369,7 +373,7 @@ export default function EditTradePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, direction: Direction.SHORT })}
+                  onClick={() => updateFormData({ direction: Direction.SHORT })}
                   className={`px-4 py-2 rounded-lg border-2 transition-colors ${
                     formData.direction === Direction.SHORT
                       ? 'bg-orange-600 border-orange-500 text-white'
@@ -386,7 +390,7 @@ export default function EditTradePage() {
               <input
                 type="number"
                 value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
+                onChange={(e) => updateFormData({ quantity: parseInt(e.target.value) || 1 })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                 required
                 min="1"
@@ -398,7 +402,7 @@ export default function EditTradePage() {
               <input
                 type="number"
                 value={formData.plannedRiskUsd}
-                onChange={(e) => setFormData({ ...formData, plannedRiskUsd: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => updateFormData({ plannedRiskUsd: parseFloat(e.target.value) || 0 })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                 required
                 min="0"
@@ -419,7 +423,7 @@ export default function EditTradePage() {
                   <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Instrument</label>
                   <select
                     value={formData.instrumentRoot}
-                    onChange={(e) => setFormData({ ...formData, instrumentRoot: e.target.value as FuturesInstrument })}
+                    onChange={(e) => updateFormData({ instrumentRoot: e.target.value as FuturesInstrument })}
                     className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                     required
                   >
@@ -466,7 +470,7 @@ export default function EditTradePage() {
                     <input
                       type="number"
                       value={formData.entryPrice}
-                      onChange={(e) => setFormData({ ...formData, entryPrice: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ entryPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                       step="0.01"
                     />
@@ -476,7 +480,7 @@ export default function EditTradePage() {
                     <input
                       type="number"
                       value={formData.exitPrice}
-                      onChange={(e) => setFormData({ ...formData, exitPrice: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ exitPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                       step="0.01"
                     />
@@ -489,7 +493,7 @@ export default function EditTradePage() {
                   <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Underlying</label>
                   <select
                     value={formData.underlying}
-                    onChange={(e) => setFormData({ ...formData, underlying: e.target.value as OptionsUnderlying })}
+                    onChange={(e) => updateFormData({ underlying: e.target.value as OptionsUnderlying })}
                     className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                     required
                   >
@@ -504,7 +508,7 @@ export default function EditTradePage() {
                     <input
                       type="number"
                       value={formData.strike}
-                      onChange={(e) => setFormData({ ...formData, strike: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ strike: parseFloat(e.target.value) || 0 })}
                       className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                       step="0.01"
                     />
@@ -513,7 +517,7 @@ export default function EditTradePage() {
                     <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Type</label>
                     <select
                       value={formData.optionType}
-                      onChange={(e) => setFormData({ ...formData, optionType: e.target.value as OptionType })}
+                      onChange={(e) => updateFormData({ optionType: e.target.value as OptionType })}
                       className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                     >
                       <option value={OptionType.CALL}>Call</option>
@@ -527,7 +531,7 @@ export default function EditTradePage() {
                     <input
                       type="date"
                       value={formData.expiration}
-                      onChange={(e) => setFormData({ ...formData, expiration: e.target.value })}
+                      onChange={(e) => updateFormData({ expiration: e.target.value })}
                       className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
@@ -536,7 +540,7 @@ export default function EditTradePage() {
                     <input
                       type="number"
                       value={formData.entryPremium}
-                      onChange={(e) => setFormData({ ...formData, entryPremium: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ entryPremium: parseFloat(e.target.value) || 0 })}
                       className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                       step="0.01"
                     />
@@ -547,7 +551,7 @@ export default function EditTradePage() {
                   <input
                     type="number"
                     value={formData.exitPremium}
-                    onChange={(e) => setFormData({ ...formData, exitPremium: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => updateFormData({ exitPremium: parseFloat(e.target.value) || 0 })}
                     className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
                     step="0.01"
                   />
@@ -556,14 +560,13 @@ export default function EditTradePage() {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Strategy</label>
+              <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Strategy (optional)</label>
               <select
                 value={formData.strategyId}
-                onChange={(e) => setFormData({ ...formData, strategyId: e.target.value, strategyVersionId: '' })}
+                onChange={(e) => updateFormData({ strategyId: e.target.value, strategyVersionId: '' })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
-                required
               >
-                <option value="">Select Strategy</option>
+                <option value="">No strategy</option>
                 {strategies.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -572,14 +575,13 @@ export default function EditTradePage() {
 
             {strategyVersions.length > 0 && (
               <div>
-                <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Strategy Version</label>
+                <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Strategy Version (optional)</label>
                 <select
                   value={formData.strategyVersionId}
-                  onChange={(e) => setFormData({ ...formData, strategyVersionId: e.target.value })}
+                  onChange={(e) => updateFormData({ strategyVersionId: e.target.value })}
                   className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
-                  required
                 >
-                  <option value="">Select Version</option>
+                  <option value="">No version</option>
                   {strategyVersions.map((v) => (
                     <option key={v.id} value={v.id}>{v.version}</option>
                   ))}
@@ -591,7 +593,7 @@ export default function EditTradePage() {
               <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Grade</label>
               <select
                 value={formData.grade}
-                onChange={(e) => setFormData({ ...formData, grade: e.target.value as Grade })}
+                onChange={(e) => updateFormData({ grade: e.target.value as Grade })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
               >
                 <option value={Grade.A_PLUS}>A+</option>
@@ -636,7 +638,7 @@ export default function EditTradePage() {
             <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Session</label>
             <select
               value={formData.session}
-              onChange={(e) => setFormData({ ...formData, session: e.target.value as Session })}
+              onChange={(e) => updateFormData({ session: e.target.value as Session })}
               className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             >
               {Object.values(Session).map((session) => (
@@ -648,7 +650,7 @@ export default function EditTradePage() {
             <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Market Regime</label>
             <select
               value={formData.marketRegime}
-              onChange={(e) => setFormData({ ...formData, marketRegime: e.target.value as MarketRegime })}
+              onChange={(e) => updateFormData({ marketRegime: e.target.value as MarketRegime })}
               className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             >
               {Object.values(MarketRegime).map((regime) => (
@@ -660,7 +662,7 @@ export default function EditTradePage() {
             <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Market Hours</label>
             <select
               value={formData.marketHoursTag}
-              onChange={(e) => setFormData({ ...formData, marketHoursTag: e.target.value as MarketHoursTag })}
+              onChange={(e) => updateFormData({ marketHoursTag: e.target.value as MarketHoursTag })}
               className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             >
               {Object.values(MarketHoursTag).map((hours) => (
@@ -675,7 +677,7 @@ export default function EditTradePage() {
           <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Notes</label>
           <textarea
             value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            onChange={(e) => updateFormData({ notes: e.target.value })}
             className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
             rows={4}
             placeholder="Add any additional notes about this trade..."
@@ -685,7 +687,7 @@ export default function EditTradePage() {
         {/* Screenshots */}
         <ImageUpload
           attachments={formData.attachments}
-          onAttachmentsChange={(attachments) => setFormData({ ...formData, attachments })}
+          onAttachmentsChange={(attachments) => updateFormData({ attachments })}
           maxImages={10}
         />
 
