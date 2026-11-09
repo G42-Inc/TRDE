@@ -4,13 +4,15 @@ import { useState, useEffect } from 'react';
 import { addDays, format } from 'date-fns';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAppData } from '@/hooks/useAppData';
-import { AssetClass, Direction, Grade, Outcome, Session, MarketRegime, MarketHoursTag, SetupTag, NewsTag, RthEth, FuturesInstrument, OptionsUnderlying, OptionType, FUTURES_GROUPS } from '@trde/core';
+import { AssetClass, Direction, Grade, Session, MarketRegime, MarketHoursTag, SetupTag, NewsTag, RthEth, FuturesInstrument, OptionsUnderlying, OptionType, FUTURES_GROUPS } from '@trde/core';
 import type { Trade, FuturesTrade, OptionsTrade } from '@trde/core';
 import { ImageUpload, type ImageAttachment } from '@/components/ImageUpload';
 import { useToast } from '@/contexts/ToastContext';
 import { getViolationRuleName } from '@/lib/violations';
 import { calculateDisciplineFlags } from '@/lib/discipline-flags';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
+import { FuturesTickFields } from '@/components/FuturesTickFields';
+import { calculateFuturesResults, calculateOptionsResults, type FuturesCalculationReference } from '@/lib/trades/calculations';
 
 export default function NewTradePage() {
   const router = useRouter();
@@ -19,6 +21,7 @@ export default function NewTradePage() {
   const { trades, strategies, riskRules, saveTrades, isLoading } = useAppData();
   const versions: any[] = []; // Versions not yet supported in demo
   const [mounted, setMounted] = useState(false);
+  const [importedFutures, setImportedFutures] = useState<FuturesCalculationReference>();
   const [assetClass, setAssetClass] = useState<AssetClass>(AssetClass.FUTURES);
   const [formData, setFormData] = useState({
     tradeDate: format(new Date(), 'yyyy-MM-dd'),
@@ -27,6 +30,10 @@ export default function NewTradePage() {
     direction: Direction.LONG,
     quantity: 1,
     plannedRiskUsd: 100,
+    feesUsd: 10,
+    tickSize: undefined as number | undefined,
+    tickValueUsd: undefined as number | undefined,
+    contractMultiplier: 100,
     grade: Grade.B,
     strategyId: '',
     strategyVersionId: '',
@@ -47,10 +54,6 @@ export default function NewTradePage() {
     expiration: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
     entryPremium: 5,
     exitPremium: 6,
-    // Imported data (optional)
-    importedResultUsd: undefined as number | undefined,
-    importedFeesUsd: undefined as number | undefined,
-    importedOutcome: undefined as Outcome | undefined,
   });
 
   const updateFormData = (changes: Partial<typeof formData>) => {
@@ -90,15 +93,24 @@ export default function NewTradePage() {
             entryTime: data.entryTime || prev.entryTime,
             exitTime: data.exitTime || prev.exitTime,
             direction: data.direction || prev.direction,
-            quantity: data.quantity || prev.quantity,
-            entryPrice: data.entryPrice || prev.entryPrice,
-            exitPrice: data.exitPrice || prev.exitPrice,
+            quantity: data.quantity ?? prev.quantity,
+            entryPrice: data.entryPrice ?? prev.entryPrice,
+            exitPrice: data.exitPrice ?? prev.exitPrice,
             notes: data.notes || prev.notes,
             instrumentRoot: data.instrumentRoot || prev.instrumentRoot,
-            importedResultUsd: data.resultUsd,
-            importedFeesUsd: data.feesUsd,
-            importedOutcome: data.outcome,
+            feesUsd: data.feesUsd ?? prev.feesUsd,
+            tickSize: data.tickSize,
+            tickValueUsd: data.tickValueUsd,
           }));
+          if (Number.isFinite(data.resultUsd)) {
+            setImportedFutures({
+              instrumentRoot: data.instrumentRoot, direction: data.direction, quantity: data.quantity,
+              entryPrice: data.entryPrice, exitPrice: data.exitPrice, feesUsd: data.feesUsd ?? 10,
+              plannedRiskUsd: 100, resultUsd: data.resultUsd, outcome: data.outcome,
+              tickSize: data.tickSize, tickValueUsd: data.tickValueUsd,
+              pointsPnL: data.pointsPnL, ticksPnL: data.ticksPnL,
+            });
+          }
           // Clear the imported data after using it
           localStorage.removeItem('trde:importTrade');
           showToast('Trade data imported from EDGE. Please review and complete the form.', 'info');
@@ -136,142 +148,109 @@ export default function NewTradePage() {
     const entryTime = new Date(`${formData.tradeDate}T${formData.entryTime}:00`).getTime();
     const exitTime = new Date(`${formData.tradeDate}T${formData.exitTime}:00`).getTime();
 
-    let newTrade: Trade;
-
-    if (assetClass === AssetClass.FUTURES) {
-      // Calculate pointsPnL from prices
-      const pointsPnL = formData.direction === Direction.LONG
-        ? (formData.exitPrice - formData.entryPrice) * formData.quantity
-        : (formData.entryPrice - formData.exitPrice) * formData.quantity;
-      
-      // Use imported result if available (from EDGE), otherwise calculate
-      let resultUsd: number;
-      let outcome: Outcome;
-      
-      if (formData.importedResultUsd !== undefined) {
-        // Use imported result from EDGE
-        resultUsd = formData.importedResultUsd;
-        outcome = formData.importedOutcome || (resultUsd > 0.01 ? Outcome.WIN : resultUsd < -0.01 ? Outcome.LOSS : Outcome.BREAKEVEN);
-      } else {
-        // Calculate from prices (default behavior)
-        resultUsd = pointsPnL * 12.5 - (formData.importedFeesUsd ?? 10);
-        outcome = resultUsd > 0.01 ? Outcome.WIN : resultUsd < -0.01 ? Outcome.LOSS : Outcome.BREAKEVEN;
-      }
-      
-      const resultR = formData.plannedRiskUsd > 0 ? resultUsd / formData.plannedRiskUsd : 0;
-
-      // Calculate discipline flags first
-      const tempTrade = {
-        id: `trade-${now}`,
-        assetClass: AssetClass.FUTURES,
-        createdAt: now,
-        updatedAt: now,
-        tradeDate: formData.tradeDate,
-        entryTime,
-        exitTime,
-        direction: formData.direction,
-        quantity: formData.quantity,
-        feesUsd: formData.importedFeesUsd ?? 10,
-        plannedRiskUsd: formData.plannedRiskUsd,
-        resultUsd,
-        resultR,
-        outcome,
-        grade: formData.grade,
-        strategyId: formData.strategyId,
-        strategyVersionId: formData.strategyVersionId,
-        setupTags: formData.setupTags,
-        session: formData.session,
-        marketHoursTag: formData.marketHoursTag,
-        marketRegime: formData.marketRegime,
-        newsTags: [NewsTag.NONE],
-        mistakes: [],
-        notes: formData.notes,
-        attachments: formData.attachments,
-        reviewFlag: false,
-        collections: [],
-        instrumentRoot: formData.instrumentRoot,
-        entryPrice: formData.entryPrice,
-        exitPrice: formData.exitPrice,
-        tickSize: 0.25,
-        tickValueUsd: 12.5,
-        pointsPnL,
-        ticksPnL: pointsPnL / 0.25,
-        rthEth: RthEth.RTH,
-        disciplineFlags: {
-          respectedDailyLossLimit: true,
-          respectedMaxTrades: true,
-          respectedMaxContracts: true,
-          hadStopDefined: true,
-          followedEntryRules: true,
-          followedExitRules: true,
-          journalCompleted: false,
-        },
-      } as FuturesTrade;
-      
-      const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
-      newTrade = { ...tempTrade, disciplineFlags };
-    } else {
-      const contractMultiplier = 100;
-      const netPremiumPnLUsd = (formData.exitPremium - formData.entryPremium) * formData.quantity * contractMultiplier - 10;
-      const resultUsd = netPremiumPnLUsd;
-      const optionRisk = formData.entryPremium * formData.quantity * contractMultiplier;
-      const resultR = optionRisk > 0 ? resultUsd / optionRisk : 0;
-      const outcome = resultR > 0.1 ? Outcome.WIN : resultR < -0.1 ? Outcome.LOSS : Outcome.BREAKEVEN;
-
-      // Calculate discipline flags first
-      const tempTrade = {
-        id: `trade-${now}`,
-        assetClass: AssetClass.OPTIONS,
-        createdAt: now,
-        updatedAt: now,
-        tradeDate: formData.tradeDate,
-        entryTime,
-        exitTime,
-        direction: Direction.LONG,
-        quantity: formData.quantity,
-        feesUsd: 10,
-        plannedRiskUsd: formData.entryPremium * formData.quantity * contractMultiplier,
-        resultUsd,
-        resultR,
-        outcome,
-        grade: formData.grade,
-        strategyId: formData.strategyId,
-        strategyVersionId: formData.strategyVersionId,
-        setupTags: formData.setupTags,
-        session: formData.session,
-        marketHoursTag: formData.marketHoursTag,
-        marketRegime: formData.marketRegime,
-        newsTags: [NewsTag.NONE],
-        mistakes: [],
-        notes: formData.notes,
-        attachments: formData.attachments,
-        reviewFlag: false,
-        collections: [],
-        underlying: formData.underlying,
-        expiration: formData.expiration,
-        dte: Math.ceil((new Date(formData.expiration).getTime() - new Date(formData.tradeDate).getTime()) / (1000 * 60 * 60 * 24)),
-        strike: formData.strike,
-        optionType: formData.optionType,
-        entryPremium: formData.entryPremium,
-        exitPremium: formData.exitPremium,
-        contractMultiplier,
-        netPremiumPnLUsd,
-        disciplineFlags: {
-          respectedDailyLossLimit: true,
-          respectedMaxTrades: true,
-          respectedMaxContracts: true,
-          hadStopDefined: true,
-          followedEntryRules: true,
-          followedExitRules: true,
-          journalCompleted: false,
-        },
-      } as OptionsTrade;
-      
-      const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
-      newTrade = { ...tempTrade, disciplineFlags };
-    }
-
     try {
+      let newTrade: Trade;
+
+      if (assetClass === AssetClass.FUTURES) {
+        const financials = calculateFuturesResults(formData, importedFutures);
+
+        // Calculate discipline flags first
+        const tempTrade = {
+          id: `trade-${now}`,
+          assetClass: AssetClass.FUTURES,
+          createdAt: now,
+          updatedAt: now,
+          tradeDate: formData.tradeDate,
+          entryTime,
+          exitTime,
+          direction: formData.direction,
+          quantity: formData.quantity,
+          feesUsd: formData.feesUsd,
+          plannedRiskUsd: formData.plannedRiskUsd,
+          ...financials,
+          grade: formData.grade,
+          strategyId: formData.strategyId,
+          strategyVersionId: formData.strategyVersionId,
+          setupTags: formData.setupTags,
+          session: formData.session,
+          marketHoursTag: formData.marketHoursTag,
+          marketRegime: formData.marketRegime,
+          newsTags: [NewsTag.NONE],
+          mistakes: [],
+          notes: formData.notes,
+          attachments: formData.attachments,
+          reviewFlag: false,
+          collections: [],
+          instrumentRoot: formData.instrumentRoot,
+          entryPrice: formData.entryPrice,
+          exitPrice: formData.exitPrice,
+          rthEth: RthEth.RTH,
+          disciplineFlags: {
+            respectedDailyLossLimit: true,
+            respectedMaxTrades: true,
+            respectedMaxContracts: true,
+            hadStopDefined: true,
+            followedEntryRules: true,
+            followedExitRules: true,
+            journalCompleted: false,
+          },
+        } as FuturesTrade;
+      
+        const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
+        newTrade = { ...tempTrade, disciplineFlags };
+      } else {
+        const financials = calculateOptionsResults(formData);
+
+        // Calculate discipline flags first
+        const tempTrade = {
+          id: `trade-${now}`,
+          assetClass: AssetClass.OPTIONS,
+          createdAt: now,
+          updatedAt: now,
+          tradeDate: formData.tradeDate,
+          entryTime,
+          exitTime,
+          direction: formData.direction,
+          quantity: formData.quantity,
+          feesUsd: formData.feesUsd,
+          plannedRiskUsd: formData.plannedRiskUsd,
+          ...financials,
+          grade: formData.grade,
+          strategyId: formData.strategyId,
+          strategyVersionId: formData.strategyVersionId,
+          setupTags: formData.setupTags,
+          session: formData.session,
+          marketHoursTag: formData.marketHoursTag,
+          marketRegime: formData.marketRegime,
+          newsTags: [NewsTag.NONE],
+          mistakes: [],
+          notes: formData.notes,
+          attachments: formData.attachments,
+          reviewFlag: false,
+          collections: [],
+          underlying: formData.underlying,
+          expiration: formData.expiration,
+          dte: Math.ceil((new Date(formData.expiration).getTime() - new Date(formData.tradeDate).getTime()) / (1000 * 60 * 60 * 24)),
+          strike: formData.strike,
+          optionType: formData.optionType,
+          entryPremium: formData.entryPremium,
+          exitPremium: formData.exitPremium,
+          contractMultiplier: formData.contractMultiplier,
+          disciplineFlags: {
+            respectedDailyLossLimit: true,
+            respectedMaxTrades: true,
+            respectedMaxContracts: true,
+            hadStopDefined: true,
+            followedEntryRules: true,
+            followedExitRules: true,
+            journalCompleted: false,
+          },
+        } as OptionsTrade;
+      
+        const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
+        newTrade = { ...tempTrade, disciplineFlags };
+      }
+
       const result = await saveTrades([...trades, newTrade]);
     
       // Show notification if violations were detected
@@ -497,6 +476,22 @@ export default function NewTradePage() {
                 step="0.01"
               />
             </div>
+            <label className="block text-sm theme-text-secondary">
+              Total fees (USD)
+              <input aria-label="Total fees (USD)" type="number" min="0" step="0.01" required
+                value={formData.feesUsd}
+                onChange={(e) => updateFormData({ feesUsd: Number(e.target.value) })}
+                className="mt-2 w-full theme-bg-secondary border theme-border theme-text rounded-md px-3 py-2" />
+            </label>
+            {assetClass === AssetClass.OPTIONS && (
+              <label className="block text-sm theme-text-secondary">
+                Contract multiplier
+                <input aria-label="Contract multiplier" type="number" min="1" step="1" required
+                  value={formData.contractMultiplier}
+                  onChange={(e) => updateFormData({ contractMultiplier: Number(e.target.value) })}
+                  className="mt-2 w-full theme-bg-secondary border theme-border theme-text rounded-md px-3 py-2" />
+              </label>
+            )}
           </div>
 
           {/* Instrument & Strategy */}
@@ -514,10 +509,13 @@ export default function NewTradePage() {
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Instrument</label>
                   <select
                     value={formData.instrumentRoot}
-                    onChange={(e) => updateFormData({ instrumentRoot: e.target.value as FuturesInstrument })}
+                    onChange={(e) => updateFormData({ instrumentRoot: e.target.value as FuturesInstrument, tickSize: undefined, tickValueUsd: undefined })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     required
                   >
+                    {!Object.values(FuturesInstrument).includes(formData.instrumentRoot) && (
+                      <option value={formData.instrumentRoot}>{formData.instrumentRoot}</option>
+                    )}
                     <optgroup label="Equity Index">
                       {FUTURES_GROUPS.EQUITY_INDEX.map((inst) => (
                         <option key={inst} value={inst}>{inst}</option>
@@ -555,6 +553,8 @@ export default function NewTradePage() {
                     </optgroup>
                   </select>
                 </div>
+                <FuturesTickFields instrumentRoot={formData.instrumentRoot} tickSize={formData.tickSize}
+                  tickValueUsd={formData.tickValueUsd} onChange={updateFormData} />
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Entry Price</label>
@@ -563,7 +563,7 @@ export default function NewTradePage() {
                       value={formData.entryPrice}
                       onChange={(e) => updateFormData({ entryPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                      step="0.01"
+                      step="any"
                     />
                   </div>
                   <div>
@@ -573,7 +573,7 @@ export default function NewTradePage() {
                       value={formData.exitPrice}
                       onChange={(e) => updateFormData({ exitPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                      step="0.01"
+                      step="any"
                     />
                   </div>
                 </div>
