@@ -8,6 +8,15 @@ For transfer to Murakami, start with [MURAKAMI_HANDOFF.md](MURAKAMI_HANDOFF.md):
 
 The existing web app is live and verified. Authenticated API persistence, provider webhooks and browser create/read/edit/reload passed, and the user confirmed their real login works. The latest release repairs journal workflows, analytics and responsive navigation on desktop and phone browsers. The earlier landing/media improvements remain deployed. See the audit evidence below.
 
+## Murakami continuation — November 9, 2026
+
+The entitlement cleanup is on `work/cloudflare-deployment` and awaits release validation. The current-entitlement and ProjectX lookup reads only the requested owner's row and no longer logs user IDs, entitlement fields, or raw database errors. Journal access and ProjectX use different authorization rules, so the two policy implementations stay separate.
+
+- All 95 web regression tests passed on Node 24.22.1. The new tests exercise the Supabase client's owner filter and request count with synthetic responses, check that database failures log a generic message, and cover ProjectX plan, demo, and expiry gates.
+- The full Windows workspace install picked up React 18 declarations from mobile in Next and styled-jsx. Web typecheck passed with the web app's pinned React 19 declarations selected in memory. The standard Worker build with synthetic public settings compiled the Next app, then stopped at the React type conflict. Worker packaging, the artifact guard, and the dry run remain pending. Git-tracked dependency and build configuration was preserved.
+- The existing workers.dev landing returned 200, `/app` redirected signed-out requests, and the trades and entitlement APIs returned 401 for signed-out and forged identity requests. This was a read-only smoke check of the existing Worker. Wrangler authentication failed on Murakami, and the current deployment's private configuration was unavailable in this checkout. The local archive points to a different backend.
+- Resume release verification with the existing TRDE configuration restored privately and authenticated Wrangler access to the selected Cloudflare account. Run a guarded Worker build and authenticated acceptance before release. Broad browser QA still requires marker-verified cleanup for all fixture-owned tables and sessions.
+
 ## Journal audit — November 9, 2026
 
 **Completed and live.** Application source `0e40907dabe07638ac351113df0a495060d962b0` includes the main audit commit `8a7c86ec8ea40464b3f3ef5f338ff29b74696453`. Worker version **`3067edb0-f14a-4b5b-88fb-93b5346204cb`** is verified at the URL above. See `docs/JOURNAL_QA.md` for the full coverage matrix and explicit limits.
