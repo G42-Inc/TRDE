@@ -4,9 +4,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { UserMenu } from './UserMenu';
 import { Session } from '@trde/core';
 import { useStorage } from '@/contexts/StorageContext';
-import { InboxIcon } from '@heroicons/react/24/outline';
+import { InboxIcon, Bars3Icon, MagnifyingGlassIcon, QuestionMarkCircleIcon } from '@heroicons/react/24/outline';
+import { useGlobalUI } from './GlobalProviders';
 import { useRouter } from 'next/navigation';
-import { isPast, parseISO } from 'date-fns';
+import { isTodoOverdue } from '@/lib/todos';
 
 function getActiveSession(nycHour: number, nycMinute: number): Session | null {
   // All session times are in NYC time (EST/EDT):
@@ -49,7 +50,8 @@ function formatTime(date: Date, timeZone: string): string {
   }).format(date);
 }
 
-export const Header = React.memo(function Header() {
+export const Header = React.memo(function Header({ onOpenNavigation, navigationOpen }: { onOpenNavigation: () => void; navigationOpen: boolean }) {
+  const { openCommandPalette, openShortcutsHelp } = useGlobalUI();
   const router = useRouter();
   const { todos, ruleViolations, trades, collections } = useStorage();
   const [times, setTimes] = useState<{
@@ -68,14 +70,18 @@ export const Header = React.memo(function Header() {
     isMarketClosed: false,
   });
   const [showInboxMenu, setShowInboxMenu] = useState(false);
+  useEffect(() => {
+    if (!showInboxMenu) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setShowInboxMenu(false); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [showInboxMenu]);
 
   // Calculate inbox items from storage context
   const inboxItems = useMemo(() => {
     // Count overdue todos
     const overdueTodos = todos.filter(todo => 
-      !todo.completed && 
-      todo.dueDate && 
-      isPast(parseISO(todo.dueDate))
+      isTodoOverdue(todo)
     ).length;
 
     // Count unreviewed rule violations
@@ -105,7 +111,7 @@ export const Header = React.memo(function Header() {
       unreviewedViolations,
       edgeTrades: unviewedEdgeCount,
     };
-  }, [todos, ruleViolations, trades, collections]);
+  }, [todos, ruleViolations, trades, collections, times.nyc]);
 
   const inboxCount = inboxItems.overdueTodos + inboxItems.unreviewedViolations + (inboxItems.edgeTrades > 0 ? 1 : 0);
 
@@ -325,15 +331,15 @@ export const Header = React.memo(function Header() {
   const isActive = (session: Session) => times.activeSession === session;
 
   return (
-    <header className="flex items-center justify-between sticky top-0 z-[100]" style={{
-      padding: 'var(--space-lg) var(--space-2xl)',
-      background: 'transparent',
+    <header className="flex min-w-0 shrink-0 items-center justify-between gap-2 px-3 py-2 sm:px-5 sm:py-3 sticky top-0 z-[100]" style={{
+      background: 'var(--glass-bg-strong, rgba(8, 15, 28, 0.96))',
       border: 'none',
       color: 'var(--glass-text, var(--theme-text))',
     }}>
-      <div className="flex items-center" style={{ gap: 'var(--space-xl)' }}>
+      <div className="flex min-w-0 items-center gap-2 sm:gap-5">
+        <button type="button" onClick={onOpenNavigation} aria-label="Open navigation" aria-expanded={navigationOpen} aria-haspopup="dialog" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg theme-text hover:theme-bg-tertiary md:hidden"><Bars3Icon className="h-6 w-6" /></button>
         {/* Market Status - Premium indicator */}
-        <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
+        <div className="flex min-w-0 items-center gap-2">
           {times.isMarketClosed ? (
             <div className="relative flex items-center justify-center">
               <span className="status-dot error" />
@@ -344,17 +350,19 @@ export const Header = React.memo(function Header() {
               <span className="absolute inset-0 w-2.5 h-2.5 bg-success rounded-full animate-ping opacity-75"></span>
             </div>
           ) : null}
-          <span className="text-body-sm font-semibold theme-text">
+          <span className="truncate text-xs font-semibold theme-text sm:text-sm">
+            <span className="sm:hidden">{times.isMarketClosed ? 'Closed' : times.activeSession ? 'Open' : 'Sessions'}</span>
+            <span className="hidden sm:inline">
             {times.isMarketClosed 
               ? 'MARKET CLOSED' 
               : times.activeSession 
                 ? `Market Open (${times.activeSession.replace('_', ' ')})` 
-                : 'Market Closed'}
+                : 'Market Closed'}</span>
           </span>
         </div>
         
         {/* Market Times - Refined layout */}
-        <div className="flex items-center text-caption" style={{ gap: 'var(--space-md)' }}>
+        <div className="hidden xl:flex items-center text-caption" style={{ gap: 'var(--space-md)' }}>
           <div className={isActive(Session.ASIA) ? '' : 'theme-text-tertiary'} style={{ fontSize: 'var(--font-size-body-sm)', color: isActive(Session.ASIA) ? 'var(--theme-success)' : undefined }}>
             <div style={{ fontWeight: 'var(--font-weight-semibold)' }}>TOKYO</div>
             <div style={{ fontSize: 'var(--font-size-caption)' }}>{times.tokyo}</div>
@@ -373,13 +381,18 @@ export const Header = React.memo(function Header() {
           </div>
         </div>
       </div>
-      <div className="flex items-center" style={{ gap: 'var(--space-lg)' }}>
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        <button type="button" onClick={openCommandPalette} aria-label="Search pages and actions" title="Search (Ctrl or Command + K)" className="hidden md:flex h-11 w-11 items-center justify-center rounded-lg theme-text-secondary hover:theme-bg-tertiary"><MagnifyingGlassIcon className="h-5 w-5" /></button>
+        <button type="button" onClick={openShortcutsHelp} aria-label="Keyboard shortcuts" className="hidden lg:flex h-11 w-11 items-center justify-center rounded-lg theme-text-secondary hover:theme-bg-tertiary"><QuestionMarkCircleIcon className="h-5 w-5" /></button>
         {/* User Menu */}
         <UserMenu />
         {/* Inbox Icon - Premium styling */}
         <div className="relative">
           <button
             onClick={() => setShowInboxMenu(!showInboxMenu)}
+            aria-label={`Inbox${inboxCount ? `, ${inboxCount} items need attention` : ''}`}
+            aria-expanded={showInboxMenu}
+            aria-controls="app-inbox"
             className="relative theme-text-secondary hover:theme-text transition-all hover:scale-110 active:scale-95"
             title="Inbox: Overdue todos and rule violations"
             style={{ padding: 'var(--space-sm)', borderRadius: 'var(--radius-md)', transitionDuration: 'var(--transition-base)' }}
@@ -399,7 +412,7 @@ export const Header = React.memo(function Header() {
                 className="fixed inset-0 z-[90]"
                 onClick={() => setShowInboxMenu(false)}
               />
-              <div className="absolute right-0 top-full glass-container animate-scale-in z-[100]" style={{ marginTop: 'var(--space-md)', width: '280px' }}>
+              <div id="app-inbox" className="absolute right-0 top-full glass-container animate-scale-in z-[100] max-w-[calc(100vw-1.5rem)]" style={{ marginTop: 'var(--space-md)', width: '280px' }}>
                 <div className="border-b" style={{ padding: 'var(--space-lg)', borderColor: 'var(--theme-border)' }}>
                   <h3 className="theme-text" style={{ fontSize: 'var(--font-size-body)', fontWeight: 'var(--font-weight-bold)' }}>Inbox</h3>
                   <p className="theme-text-secondary" style={{ fontSize: 'var(--font-size-caption)', marginTop: 'var(--space-xs)' }}>
@@ -412,7 +425,7 @@ export const Header = React.memo(function Header() {
                   {inboxItems.overdueTodos > 0 && (
                     <button
                       onClick={() => {
-                        router.push('/');
+                        router.push('/app#todos');
                         setShowInboxMenu(false);
                       }}
                       className="w-full text-left hover:theme-bg-tertiary transition-all text-body-sm"

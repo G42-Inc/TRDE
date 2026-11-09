@@ -1,7 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { getEdgeAccountScope, isCurrentEdgeAccount } from '@/lib/edge/store/accountScope';
+
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { createChart, IChartApi, ISeriesApi, ColorType, Time, UTCTimestamp, LineStyle, CandlestickSeries, LineSeries } from 'lightweight-charts';
 import { Group, Panel, Separator } from 'react-resizable-panels';
 import { getTrades } from '@/lib/edge/store/edgeStore';
@@ -23,6 +26,8 @@ import {
 } from '@/lib/edge/chart/sim/simulator';
 import { saveSimSession, loadSimSessionByContract } from '@/lib/edge/chart/sim/persistence';
 import { saveSimTradesToJournal } from '@/lib/edge/chart/sim/export';
+import { createJournalSaveQueue } from '@/lib/edge/chart/sim/save-queue';
+import type { SimTradeClosed } from '@/lib/edge/chart/sim/types';
 import { calculateTotalPnL } from '@/lib/edge/chart/sim/pnl';
 import type { PositionOverlay } from '@/lib/edge/chart/overlays/types';
 import { createOverlayFromTradeEntry, updateOverlayForTradeExit, priceToYCoordinate, timeToXCoordinate, yCoordinateToPrice, xCoordinateToTime } from '@/lib/edge/chart/overlays/utils';
@@ -57,6 +62,32 @@ interface ActiveIndicator {
 }
 
 export default function EdgeChartPage() {
+  const [status, setStatus] = useState<'loading' | 'connected' | 'disconnected' | 'error'>('loading');
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setStatus('loading');
+    fetch('/api/edge/projectx/connect', { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('Connection status unavailable');
+        const data = await response.json();
+        setStatus(data.connected ? 'connected' : 'disconnected');
+      })
+      .catch(() => { if (!controller.signal.aborted) setStatus('error'); });
+    return () => controller.abort();
+  }, [attempt]);
+  if (status === 'connected') return <EdgeChartWorkspace />;
+  return <section className="card-premium space-y-4 p-6">
+    <h1 className="text-2xl font-bold theme-text">EDGE Chart</h1>
+    <p role="status" className="theme-text-secondary">{status === 'loading' ? 'Checking your data connection…' : status === 'error' ? 'Unable to check your ProjectX connection. Please try again.' : 'Connect a ProjectX account to load market data for chart review and simulated replay.'}</p>
+    {status === 'error' && <button className="theme-button rounded-lg px-4 py-2" onClick={() => setAttempt(value => value + 1)}>Try again</button>}
+    {status === 'disconnected' && <Link className="inline-block theme-button rounded-lg px-4 py-2" href="/settings?tab=api">Connect ProjectX</Link>}
+    <Link href="/edge" className="block theme-text underline">Back to EDGE</Link>
+  </section>;
+}
+
+function EdgeChartWorkspace() {
+  const edgeScope = getEdgeAccountScope();
   const router = useRouter();
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -71,6 +102,23 @@ export default function EdgeChartPage() {
   const [bars, setBars] = useState<any[]>([]);
   const [barsForIndicators, setBarsForIndicators] = useState<Bar[]>([]);
   const [loading, setLoading] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [journalSaving, setJournalSaving] = useState(false);
+  const [journalSaveError, setJournalSaveError] = useState<string | null>(null);
+  const [journalSaveMessage, setJournalSaveMessage] = useState<string | null>(null);
+  const journalSaveQueue = useMemo(() => createJournalSaveQueue<SimTradeClosed>({
+    persist: (closedTrades) => saveSimTradesToJournal(closedTrades, edgeScope),
+    isCurrentAccount: () => isCurrentEdgeAccount(edgeScope),
+    onPending: setJournalSaving,
+    onSaved: (count, failures) => {
+      if (!failures) setJournalSaveError(null);
+      setJournalSaveMessage(count ? `${count} simulated trade${count === 1 ? '' : 's'} saved to your journal.` : 'These trades are already saved in your journal.');
+    },
+    onError: (error) => {
+      setJournalSaveMessage(null);
+      setJournalSaveError(error.message || 'Could not save simulated trades.');
+    },
+  }), [edgeScope]);
   const [trades, setTrades] = useState<RoundTripTrade[]>([]);
   const [prefs, setPrefs] = useState(getChartPreferences());
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>([]);
@@ -582,16 +630,12 @@ export default function EdgeChartPage() {
         if (updatedSession.closedTrades.length > simSession.closedTrades.length) {
           const newlyClosedTrades = updatedSession.closedTrades.slice(simSession.closedTrades.length);
           if (newlyClosedTrades.length > 0) {
-            saveSimTradesToJournal(newlyClosedTrades);
-            // Store notification count for header to display
-            const existingNotifications = localStorage.getItem('trde:edgeTradeNotifications');
-            const currentCount = existingNotifications ? parseInt(existingNotifications, 10) : 0;
-            localStorage.setItem('trde:edgeTradeNotifications', (currentCount + newlyClosedTrades.length).toString());
+            void journalSaveQueue.save(newlyClosedTrades);
           }
         }
         
         setSimSession(updatedSession);
-        saveSimSession(updatedSession);
+        saveSimSession(updatedSession, edgeScope);
       }
       
       setReplayState(prev => ({ ...prev, currentIndex: newIndex }));
@@ -672,6 +716,7 @@ export default function EdgeChartPage() {
     if (!contractId) return;
 
     setLoading(true);
+    setDataError(null);
     try {
       const endTime = new Date();
       const startTime = new Date(endTime.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days
@@ -689,6 +734,8 @@ export default function EdgeChartPage() {
       });
 
       const data = await res.json();
+      if (!res.ok || !Array.isArray(data.bars)) throw new Error('Market data could not be loaded. Check your connection and try again.');
+      if (!data.bars.length) setDataError('No candles are available for this contract and timeframe.');
       if (data.bars) {
         setBars(data.bars);
         // Reset replay when new bars are loaded
@@ -709,7 +756,7 @@ export default function EdgeChartPage() {
         }
       }
     } catch (error) {
-      console.error('Failed to load bars:', error);
+      setDataError(error instanceof Error ? error.message : 'Unable to load chart data.');
     } finally {
       setLoading(false);
     }
@@ -753,16 +800,12 @@ export default function EdgeChartPage() {
             if (updatedSession.closedTrades.length > simSession.closedTrades.length) {
               const newlyClosedTrades = updatedSession.closedTrades.slice(simSession.closedTrades.length);
               if (newlyClosedTrades.length > 0) {
-                saveSimTradesToJournal(newlyClosedTrades);
-                // Store notification count for header to display
-                const existingNotifications = localStorage.getItem('trde:edgeTradeNotifications');
-                const currentCount = existingNotifications ? parseInt(existingNotifications, 10) : 0;
-                localStorage.setItem('trde:edgeTradeNotifications', (currentCount + newlyClosedTrades.length).toString());
+                void journalSaveQueue.save(newlyClosedTrades);
               }
             }
             
             setSimSession(updatedSession);
-            saveSimSession(updatedSession);
+            saveSimSession(updatedSession, edgeScope);
           }
           
           // Update chart synchronously
@@ -837,6 +880,7 @@ export default function EdgeChartPage() {
       return;
     }
     try {
+      setDataError(null);
       const res = await fetch('/api/edge/projectx/contracts/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -845,23 +889,15 @@ export default function EdgeChartPage() {
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: `HTTP ${res.status}: ${res.statusText}` }));
-        console.error('Contract search API error:', errorData);
+        setDataError('Contract search is unavailable. Check your ProjectX connection and try again.');
         setContractOptions([]);
         return;
       }
       
       const data = await res.json();
       
-      // Log response for debugging
-      console.log('Contract search response:', {
-        hasContracts: !!data.contracts,
-        contractsLength: data.contracts?.length,
-        error: data.error,
-        dataKeys: Object.keys(data),
-      });
-      
       if (data.error) {
-        console.error('Contract search error in response:', data.error);
+        setDataError('Contract search did not succeed. Try again.');
         setContractOptions([]);
         return;
       }
@@ -878,7 +914,7 @@ export default function EdgeChartPage() {
           
           // Load or create simulation session if enabled
           if (simulationEnabled) {
-            const existing = loadSimSessionByContract(active.id);
+            const existing = loadSimSessionByContract(active.id, edgeScope);
             if (existing) {
               setSimSession(existing);
             } else {
@@ -888,7 +924,7 @@ export default function EdgeChartPage() {
                 { slippageTicks: 0, commissionPerContractPerSide: 0 }
               );
               setSimSession(newSession);
-              saveSimSession(newSession);
+              saveSimSession(newSession, edgeScope);
             }
           }
         }
@@ -896,7 +932,7 @@ export default function EdgeChartPage() {
         setContractOptions([]);
       }
     } catch (error) {
-      console.error('Contract search failed:', error);
+      setDataError('Unable to search contracts. Try again.');
       setContractOptions([]);
     }
   };
@@ -909,7 +945,7 @@ export default function EdgeChartPage() {
     
     // Load or create simulation session for this contract
     if (simulationEnabled) {
-      const existing = loadSimSessionByContract(contract.id);
+      const existing = loadSimSessionByContract(contract.id, edgeScope);
       if (existing) {
         setSimSession(existing);
       } else {
@@ -919,7 +955,7 @@ export default function EdgeChartPage() {
           { slippageTicks: 0, commissionPerContractPerSide: 0 }
         );
         setSimSession(newSession);
-        saveSimSession(newSession);
+        saveSimSession(newSession, edgeScope);
       }
     }
   };
@@ -954,7 +990,7 @@ export default function EdgeChartPage() {
     if (simulationEnabled) {
       if (selectedContract && selectedContract.tickSize && selectedContract.tickValue) {
         // Contract has all required metadata
-        const existing = loadSimSessionByContract(selectedContract.id);
+        const existing = loadSimSessionByContract(selectedContract.id, edgeScope);
         if (existing) {
           setSimSession(existing);
         } else {
@@ -964,7 +1000,7 @@ export default function EdgeChartPage() {
             { slippageTicks: 0, commissionPerContractPerSide: 0 }
           );
           setSimSession(newSession);
-          saveSimSession(newSession);
+          saveSimSession(newSession, edgeScope);
         }
       } else if (contractId && !selectedContract) {
         // We have a contractId but no full contract object - fetch it
@@ -973,7 +1009,7 @@ export default function EdgeChartPage() {
           .then((data) => {
             if (data.contract && data.contract.tickSize && data.contract.tickValue) {
               setSelectedContract(data.contract);
-              const existing = loadSimSessionByContract(data.contract.id);
+              const existing = loadSimSessionByContract(data.contract.id, edgeScope);
               if (existing) {
                 setSimSession(existing);
               } else {
@@ -983,7 +1019,7 @@ export default function EdgeChartPage() {
                   { slippageTicks: 0, commissionPerContractPerSide: 0 }
                 );
                 setSimSession(newSession);
-                saveSimSession(newSession);
+                saveSimSession(newSession, edgeScope);
               }
             }
           })
@@ -1006,12 +1042,18 @@ export default function EdgeChartPage() {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden theme-bg">
-      <div className="flex-shrink-0 space-y-4 p-6">
+      <div className="flex-shrink-0 space-y-4 p-3 sm:p-6">
+        {dataError && <p role="alert" className="text-sm text-red-500">{dataError} <button className="underline" onClick={() => loadBars()}>Retry chart</button></p>}
+      {journalSaveError && <div role="alert" className="rounded-lg border border-red-400/30 p-3 text-sm text-red-400">
+        <p>Simulated trades have not been saved: {journalSaveError}</p>
+        <button type="button" disabled={journalSaving} className="mt-2 min-h-11 underline disabled:opacity-50" onClick={() => { void journalSaveQueue.retry(); }}>{journalSaving ? 'Saving…' : 'Retry journal save'}</button>
+      </div>}
+      {journalSaveMessage && !journalSaveError && <p role="status" className="text-sm theme-text-secondary">{journalSaveMessage}</p>}
         {/* Header with Back Button and Collapse Toggle - Enhanced */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push('/edge')}
+              aria-label="Back to EDGE" onClick={() => router.push('/edge')}
               className="p-3 rounded-xl theme-bg-tertiary hover:opacity-80 transition-all duration-200 hover:scale-105 active:scale-95"
             >
               <ArrowLeftIcon className="h-6 w-6" />
@@ -1054,7 +1096,7 @@ export default function EdgeChartPage() {
                     setContractOptions([]);
                   }
                 }}
-                placeholder="Search contract (e.g., MNQ, ES)"
+                aria-label="Search contract" placeholder="Search contract (e.g., MNQ, ES)"
                 className="w-full px-4 py-3 border-2 theme-border rounded-xl theme-bg-tertiary theme-text font-semibold focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-200"
               />
               {contractOptions.length > 0 && (
@@ -1128,7 +1170,7 @@ export default function EdgeChartPage() {
                     const enabled = !simulationEnabled;
                     setSimulationEnabled(enabled);
                     if (enabled && selectedContract) {
-                      const existing = loadSimSessionByContract(selectedContract.id);
+                      const existing = loadSimSessionByContract(selectedContract.id, edgeScope);
                       if (existing) {
                         setSimSession(existing);
                       } else {
@@ -1138,7 +1180,7 @@ export default function EdgeChartPage() {
                           { slippageTicks: 0, commissionPerContractPerSide: 0 }
                         );
                         setSimSession(newSession);
-                        saveSimSession(newSession);
+                        saveSimSession(newSession, edgeScope);
                       }
                     } else {
                       setSimSession(null);
@@ -1444,7 +1486,7 @@ export default function EdgeChartPage() {
                     }
                     
                     setSimSession(updated);
-                    saveSimSession(updated);
+                    saveSimSession(updated, edgeScope);
                     
                     // Update chart markers immediately
                     if (candlestickSeriesRef.current) {
@@ -1456,33 +1498,28 @@ export default function EdgeChartPage() {
                   if (simSession) {
                     const updated = closePosition(simSession, replayState.currentIndex);
                     setSimSession(updated);
-                    saveSimSession(updated);
+                    saveSimSession(updated, edgeScope);
                   }
                 }}
                 onReset={() => {
                   if (simSession) {
                     const updated = resetSimulation(simSession);
                     setSimSession(updated);
-                    saveSimSession(updated);
+                    saveSimSession(updated, edgeScope);
                   }
                 }}
                 onUpdateSettings={(settings) => {
                   if (simSession) {
                     const updated = updateSimSettings(simSession, settings);
                     setSimSession(updated);
-                    saveSimSession(updated);
+                    saveSimSession(updated, edgeScope);
                   }
                 }}
-                onSaveToJournal={() => {
-                  if (simSession && simSession.closedTrades.length > 0) {
-                    const tradeCount = simSession.closedTrades.length;
-                    saveSimTradesToJournal(simSession.closedTrades);
-                    // Store notification count for header to display
-                    const existingNotifications = localStorage.getItem('trde:edgeTradeNotifications');
-                    const currentCount = existingNotifications ? parseInt(existingNotifications, 10) : 0;
-                    localStorage.setItem('trde:edgeTradeNotifications', (currentCount + tradeCount).toString());
-                    router.push('/trades');
-                  }
+                journalSaving={journalSaving}
+                onSaveToJournal={async () => {
+                  if (!simSession?.closedTrades.length || journalSaving) return;
+                  const saved = await journalSaveQueue.save(simSession.closedTrades);
+                  if (saved && isCurrentEdgeAccount(edgeScope)) router.push('/trades');
                 }}
                 position={simPanelPosition}
                 onPositionChange={setSimPanelPosition}
@@ -1579,7 +1616,7 @@ export default function EdgeChartPage() {
         prefs={prefs}
         onPrefsChange={(newPrefs) => {
           setPrefs(newPrefs);
-          saveChartPreferences(newPrefs);
+          saveChartPreferences(newPrefs, edgeScope);
         }}
       />
     </div>

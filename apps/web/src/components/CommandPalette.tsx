@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ModalDialog } from './ModalDialog';
 import { useRouter } from 'next/navigation';
 import {
   MagnifyingGlassIcon,
@@ -194,7 +194,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     if (isOpen) {
       setSearch('');
       setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 50);
+      inputRef.current?.focus();
     }
   }, [isOpen]);
 
@@ -211,7 +211,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setSelectedIndex(i => Math.min(i + 1, filteredCommands.length - 1));
+        setSelectedIndex(i => Math.max(0, Math.min(i + 1, filteredCommands.length - 1)));
         break;
       case 'ArrowUp':
         e.preventDefault();
@@ -241,33 +241,21 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
   let flatIndex = 0;
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center z-50 pt-[15vh]"
-          onClick={(e) => e.target === e.currentTarget && onClose()}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            transition={{ duration: 0.15 }}
-            className="w-full max-w-xl glass-surface-dark rounded-2xl shadow-2xl overflow-hidden"
-            onKeyDown={handleKeyDown}
-          >
+    <ModalDialog isOpen={isOpen} onClose={onClose} labelledBy="command-palette-title" className="items-start justify-center pt-[8dvh] sm:pt-[12dvh]">
+      <section className="flex max-h-[80dvh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/15 bg-slate-950 text-white shadow-2xl" onKeyDown={handleKeyDown}>
+        <h2 id="command-palette-title" className="sr-only">Search pages and actions</h2>
             {/* Search Input */}
             <div className="flex items-center gap-3 p-4 border-b border-white/10">
               <MagnifyingGlassIcon className="w-5 h-5 text-white/40" />
               <input
                 ref={inputRef}
                 type="text"
+                aria-label="Search pages and actions"
+                autoFocus
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Type a command or search..."
-                className="flex-1 bg-transparent text-white placeholder-white/40 outline-none text-lg"
+                className="min-w-0 flex-1 bg-transparent text-white placeholder-white/40 outline-none text-lg"
               />
               <kbd className="px-2 py-1 rounded bg-white/10 text-xs text-white/50 font-mono">
                 ESC
@@ -275,7 +263,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             </div>
 
             {/* Commands List */}
-            <div ref={listRef} className="max-h-96 overflow-y-auto py-2">
+            <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto py-2">
               {filteredCommands.length === 0 ? (
                 <div className="px-4 py-8 text-center text-white/40">
                   No commands found for &quot;{search}&quot;
@@ -333,7 +321,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             </div>
 
             {/* Footer hint */}
-            <div className="px-4 py-3 border-t border-white/10 flex items-center justify-between text-xs text-white/40">
+            <div className="shrink-0 px-4 py-3 border-t border-white/10 flex flex-wrap gap-2 items-center justify-between text-xs text-white/60">
               <div className="flex items-center gap-4">
                 <span className="flex items-center gap-1">
                   <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono">↑↓</kbd>
@@ -344,14 +332,9 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
                   to select
                 </span>
               </div>
-              <span className="flex items-center gap-1">
-                <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono">?</kbd>
-                for shortcuts
-              </span>
+
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+      </section>
+    </ModalDialog>
   );
 }

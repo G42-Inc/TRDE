@@ -31,8 +31,7 @@ export default function EditTradePage() {
 function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: string }) {
   const router = useRouter();
   const { showToast } = useToast();
-  const { trades, strategies, riskRules, journals, saveTrades, isDemo, isDemoLoading } = useAppData();
-  const versions: any[] = []; // Versions not yet supported in demo
+  const { trades, strategies, versions, riskRules, journals, saveTrades, isDemo, isDemoLoading } = useAppData();
   const draftKey = JSON.stringify([accountId, tradeId]);
   const [loadedDraft, setLoadedDraft] = useState<{ key: string; trade: Trade } | null>(null);
   const [loadError, setLoadError] = useState<{ key: string; message: string } | null>(null);
@@ -72,6 +71,9 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
     entryPremium: 0,
     exitPremium: 0,
   });
+
+  const [saving, setSaving] = useState(false);
+  const [readingImages, setReadingImages] = useState(false);
 
   const updateFormData = (changes: Partial<typeof formData>) => {
     setFormData((previous) => ({ ...previous, ...changes }));
@@ -151,7 +153,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
         <div className="theme-bg-secondary p-6 rounded-xl border theme-border space-y-6">
           <SkeletonLoader width="150px" height="1.5rem" />
           <SkeletonLoader width="100%" height="1rem" lines={12} />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <SkeletonLoader width="100%" height="3rem" />
             <SkeletonLoader width="100%" height="3rem" />
           </div>
@@ -167,6 +169,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving || readingImages) return;
     if (!trade) return;
     
     const hasJournal = journals.some(j => j.tradeId === trade.id);
@@ -174,6 +177,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
     const entryTime = editedTradeTimestamp(trade.entryTime, trade.tradeDate, formData.tradeDate, formData.entryTime);
     const exitTime = editedTradeTimestamp(trade.exitTime, trade.tradeDate, formData.tradeDate, formData.exitTime);
 
+    setSaving(true);
     try {
       let updatedTrade: Trade;
 
@@ -264,7 +268,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
       router.push(`/trades/${trade.id}`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Unable to save trade. Please try again.', 'error');
-    }
+    } finally { setSaving(false); }
   };
 
   const toggleSetupTag = (tag: SetupTag) => {
@@ -286,9 +290,9 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
         <h1 className="text-3xl font-bold text-black dark:text-white">Edit Trade</h1>
       </div>
       
-      <form onSubmit={handleSubmit} className="glass-surface p-6 rounded-lg space-y-6">
+      <form onSubmit={handleSubmit} className="glass-surface p-4 sm:p-6 rounded-lg space-y-6">
         {/* Asset Class Selection */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button
             type="button"
             onClick={() => setAssetClass(AssetClass.FUTURES)}
@@ -320,7 +324,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
             
             <div>
               <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Trade Date</label>
-              <input
+              <input aria-label="Trade Date"
                 type="date"
                 value={formData.tradeDate}
                 onChange={(e) => updateFormData({ tradeDate: e.target.value })}
@@ -329,10 +333,10 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Entry Time</label>
-                <input
+                <input aria-label="Entry Time"
                   type="time"
                   value={formData.entryTime}
                   onChange={(e) => updateFormData({ entryTime: e.target.value })}
@@ -342,7 +346,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
               </div>
               <div>
                 <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Exit Time</label>
-                <input
+                <input aria-label="Exit Time"
                   type="time"
                   value={formData.exitTime}
                   onChange={(e) => updateFormData({ exitTime: e.target.value })}
@@ -354,7 +358,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
 
             <div>
               <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Direction</label>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
                   type="button"
                   onClick={() => updateFormData({ direction: Direction.LONG })}
@@ -382,7 +386,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
 
             <div>
               <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Quantity</label>
-              <input
+              <input aria-label="Quantity"
                 type="number"
                 value={formData.quantity}
                 onChange={(e) => updateFormData({ quantity: parseInt(e.target.value) || 1 })}
@@ -394,7 +398,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
 
             <div>
               <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Planned Risk (USD)</label>
-              <input
+              <input aria-label="Planned Risk (USD)"
                 type="number"
                 value={formData.plannedRiskUsd}
                 onChange={(e) => updateFormData({ plannedRiskUsd: parseFloat(e.target.value) || 0 })}
@@ -432,7 +436,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
               <>
                 <div>
                   <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Instrument</label>
-                  <select
+                  <select aria-label="Instrument"
                     value={formData.instrumentRoot}
                     onChange={(e) => updateFormData({ instrumentRoot: e.target.value as FuturesInstrument, tickSize: undefined, tickValueUsd: undefined })}
                     className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -480,10 +484,10 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
                 </div>
                 <FuturesTickFields instrumentRoot={formData.instrumentRoot} tickSize={formData.tickSize}
                   tickValueUsd={formData.tickValueUsd} onChange={updateFormData} />
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Entry Price</label>
-                    <input
+                    <input aria-label="Entry Price"
                       type="number"
                       value={formData.entryPrice}
                       onChange={(e) => updateFormData({ entryPrice: parseFloat(e.target.value) || 0 })}
@@ -493,7 +497,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Exit Price</label>
-                    <input
+                    <input aria-label="Exit Price"
                       type="number"
                       value={formData.exitPrice}
                       onChange={(e) => updateFormData({ exitPrice: parseFloat(e.target.value) || 0 })}
@@ -507,7 +511,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
               <>
                 <div>
                   <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Underlying</label>
-                  <select
+                  <select aria-label="Underlying"
                     value={formData.underlying}
                     onChange={(e) => updateFormData({ underlying: e.target.value as OptionsUnderlying })}
                     className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -518,10 +522,10 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
                     ))}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Strike</label>
-                    <input
+                    <input aria-label="Strike"
                       type="number"
                       value={formData.strike}
                       onChange={(e) => updateFormData({ strike: parseFloat(e.target.value) || 0 })}
@@ -531,7 +535,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Type</label>
-                    <select
+                    <select aria-label="Type"
                       value={formData.optionType}
                       onChange={(e) => updateFormData({ optionType: e.target.value as OptionType })}
                       className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -541,10 +545,10 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
                     </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Expiration</label>
-                    <input
+                    <input aria-label="Expiration"
                       type="date"
                       value={formData.expiration}
                       onChange={(e) => updateFormData({ expiration: e.target.value })}
@@ -553,7 +557,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Entry Premium</label>
-                    <input
+                    <input aria-label="Entry Premium"
                       type="number"
                       value={formData.entryPremium}
                       onChange={(e) => updateFormData({ entryPremium: parseFloat(e.target.value) || 0 })}
@@ -564,7 +568,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Exit Premium</label>
-                  <input
+                  <input aria-label="Exit Premium"
                     type="number"
                     value={formData.exitPremium}
                     onChange={(e) => updateFormData({ exitPremium: parseFloat(e.target.value) || 0 })}
@@ -577,7 +581,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
 
             <div>
               <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Strategy (optional)</label>
-              <select
+              <select aria-label="Strategy (optional)"
                 value={formData.strategyId}
                 onChange={(e) => updateFormData({ strategyId: e.target.value, strategyVersionId: '' })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -592,7 +596,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
             {strategyVersions.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Strategy Version (optional)</label>
-                <select
+                <select aria-label="Strategy Version (optional)"
                   value={formData.strategyVersionId}
                   onChange={(e) => updateFormData({ strategyVersionId: e.target.value })}
                   className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -607,7 +611,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
 
             <div>
               <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Grade</label>
-              <select
+              <select aria-label="Grade"
                 value={formData.grade}
                 onChange={(e) => updateFormData({ grade: e.target.value as Grade })}
                 className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -652,7 +656,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Session</label>
-            <select
+            <select aria-label="Session"
               value={formData.session}
               onChange={(e) => updateFormData({ session: e.target.value as Session })}
               className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -664,7 +668,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
           </div>
           <div>
             <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Market Regime</label>
-            <select
+            <select aria-label="Market Regime"
               value={formData.marketRegime}
               onChange={(e) => updateFormData({ marketRegime: e.target.value as MarketRegime })}
               className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -676,7 +680,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
           </div>
           <div>
             <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Market Hours</label>
-            <select
+            <select aria-label="Market Hours"
               value={formData.marketHoursTag}
               onChange={(e) => updateFormData({ marketHoursTag: e.target.value as MarketHoursTag })}
               className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -691,7 +695,7 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
         {/* Notes */}
         <div>
           <label className="block text-sm font-medium text-black/60 dark:text-white/60 mb-2">Notes</label>
-          <textarea
+          <textarea aria-label="Notes"
             value={formData.notes}
             onChange={(e) => updateFormData({ notes: e.target.value })}
             className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 text-black dark:text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
@@ -702,18 +706,21 @@ function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: strin
 
         {/* Screenshots */}
         <ImageUpload
+          disabled={saving}
+          onBusyChange={setReadingImages}
           attachments={formData.attachments}
           onAttachmentsChange={(attachments) => updateFormData({ attachments })}
           maxImages={10}
         />
 
         {/* Actions */}
-        <div className="flex space-x-4 pt-4 border-t border-black/10 dark:border-white/10">
+        <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-black/10 dark:border-white/10">
           <button
             type="submit"
+            disabled={saving || readingImages}
             className="flex-1 px-6 py-3 bg-accent text-white rounded-md hover:bg-accent-dark font-medium transition-colors"
           >
-            Save Changes
+            {saving ? 'Saving…' : readingImages ? 'Loading screenshots…' : 'Save Changes'}
           </button>
           <button
             type="button"

@@ -9,6 +9,7 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSam
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
+import { CollectionManager } from '@/components/CollectionManager';
 import { capitalizeFirst } from '@/lib/utils/formatEnum';
 
 interface DayData {
@@ -23,17 +24,16 @@ interface DayData {
 
 export default function ReviewPage() {
   const router = useRouter();
-  const { 
-    trades, 
-    dailyBiases: biases, 
-    quickJournals: journals, 
-    strategies, 
-    isLoading 
+  const {
+    trades,
+    dailyBiases: biases,
+    quickJournals: journals,
+    strategies,
+    collections,
+    isLoading
   } = useAppData();
-  const collections: Collection[] = []; // Collections not yet supported in demo
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
-  const [dayData, setDayData] = useState<DayData | null>(null);
   const [mounted, setMounted] = useState(false);
   const [showEdgeTrades, setShowEdgeTrades] = useState(false);
 
@@ -42,7 +42,7 @@ export default function ReviewPage() {
     const timer = setTimeout(() => {
       setMounted(true);
     }, 100);
-    
+
     return () => {
       clearTimeout(timer);
     };
@@ -52,7 +52,7 @@ export default function ReviewPage() {
   const isEdgeTrade = (trade: Trade): boolean => {
     const edgeCollection = collections.find((c) => c.name === 'EDGE');
     return (edgeCollection && trade.collections.includes(edgeCollection.id)) ||
-           trade.notes?.startsWith('[EDGE');
+           Boolean(trade.notes?.startsWith('[EDGE') || trade.id.startsWith('edge-') || trade.notes?.startsWith('Imported from EDGE'));
   };
 
   if (!mounted) {
@@ -70,23 +70,23 @@ export default function ReviewPage() {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const daysInMonth = getDaysInMonth(currentMonth);
-  
+
   // Get first day of week for the month (0 = Sunday, 6 = Saturday)
   const firstDayOfWeek = monthStart.getDay();
-  
+
   // Create calendar days array (including days from previous/next month to fill the grid)
   const calendarDays: (Date | null)[] = [];
-  
+
   // Add empty cells for days before the first day of the month
   for (let i = 0; i < firstDayOfWeek; i++) {
     calendarDays.push(null);
   }
-  
+
   // Add all days of the current month
   for (let day = 1; day <= daysInMonth; day++) {
     calendarDays.push(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), day));
   }
-  
+
   // Fill remaining cells to complete the grid (6 rows × 7 days = 42 cells)
   while (calendarDays.length < 42) {
     calendarDays.push(null);
@@ -94,7 +94,7 @@ export default function ReviewPage() {
 
   const getDayData = (date: Date | null): DayData | null => {
     if (!date) return null;
-    
+
     const dateStr = format(date, 'yyyy-MM-dd');
     // Filter trades based on toggle: show only EDGE trades or only real trades
     let dayTrades = trades.filter(t => {
@@ -102,16 +102,16 @@ export default function ReviewPage() {
       const isEdge = isEdgeTrade(t);
       return showEdgeTrades ? isEdge : !isEdge;
     });
-    
+
     const dayBias = biases.find(b => b.date === dateStr) || null;
     const dayJournals = journals.filter(j => {
       const journalDate = format(new Date(j.timestamp), 'yyyy-MM-dd');
       return journalDate === dateStr;
     });
-    
+
     const dayPnL = dayTrades.reduce((sum, t) => sum + t.resultUsd, 0);
-    const strategySet = new Set(dayTrades.map(t => t.strategyId));
-    
+    const strategySet = new Set(dayTrades.map(t => t.strategyId).filter(Boolean));
+
     return {
       date,
       pnl: dayPnL,
@@ -123,10 +123,11 @@ export default function ReviewPage() {
     };
   };
 
+  const dayData = getDayData(selectedDay);
+
   const handleDayClick = (date: Date | null) => {
     if (!date) return;
     setSelectedDay(date);
-    setDayData(getDayData(date));
   };
 
   const handleAddTrade = (date: Date) => {
@@ -151,14 +152,14 @@ export default function ReviewPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const isFutureDate = date && date > today;
-    
+
     if (tradeCount === 0 || pnl === 0 || isFutureDate) {
       return {
         bg: 'bg-transparent',
         text: 'theme-text-secondary',
       };
     }
-    
+
     if (showEdgeTrades) {
       // Blue/orange for EDGE trades
       return {
@@ -182,7 +183,7 @@ export default function ReviewPage() {
             <CalendarIcon className="h-7 w-7 text-white" />
           </div>
           <div>
-            <h1 className="text-4xl font-bold theme-text tracking-tight">Review Calendar</h1>
+            <h1 className="text-2xl sm:text-4xl font-bold theme-text tracking-tight">Review Calendar</h1>
             <p className="theme-text-secondary mt-1">Track your trading performance day by day</p>
           </div>
         </div>
@@ -194,6 +195,7 @@ export default function ReviewPage() {
             <button
               type="button"
               role="switch"
+              aria-label="Show EDGE trades"
               aria-checked={showEdgeTrades}
               onClick={() => setShowEdgeTrades(!showEdgeTrades)}
               className={`
@@ -215,21 +217,25 @@ export default function ReviewPage() {
         </div>
       </div>
 
+      <CollectionManager />
+
       {/* Calendar - Enhanced */}
-      <div className="theme-bg-secondary p-8 rounded-2xl border theme-border animate-slide-in-up" style={{ boxShadow: 'var(--shadow-md)' }}>
+      <div className="theme-bg-secondary p-2 sm:p-8 rounded-2xl border theme-border animate-slide-in-up" style={{ boxShadow: 'var(--shadow-md)' }}>
         {/* Month Navigation - Enhanced */}
         <div className="flex items-center justify-between mb-8">
           <button
             onClick={previousMonth}
+            aria-label="Previous month"
             className="p-3 rounded-xl theme-bg-tertiary hover:opacity-80 transition-all duration-200 hover:scale-105 active:scale-95 theme-text"
           >
             <ChevronLeftIcon className="h-6 w-6" />
           </button>
-          <h2 className="text-3xl font-bold theme-text tracking-tight">
+          <h2 className="text-xl sm:text-3xl font-bold theme-text tracking-tight">
             {format(currentMonth, 'MMMM yyyy')}
           </h2>
           <button
             onClick={nextMonth}
+            aria-label="Next month"
             className="p-3 rounded-xl theme-bg-tertiary hover:opacity-80 transition-all duration-200 hover:scale-105 active:scale-95 theme-text"
           >
             <ChevronRightIcon className="h-6 w-6" />
@@ -237,7 +243,7 @@ export default function ReviewPage() {
         </div>
 
         {/* Calendar Grid - Enhanced */}
-        <div className="grid grid-cols-7 gap-3">
+        <div className="grid grid-cols-7 gap-1 sm:gap-3">
           {/* Week day headers - Enhanced */}
           {weekDays.map((day) => (
             <div
@@ -254,14 +260,15 @@ export default function ReviewPage() {
             const isCurrentMonth = date && isSameMonth(date, currentMonth);
             const isToday = date && isSameDay(date, new Date());
             const colors = data ? getColorClasses(data.pnl, data.pnl > 0, data.tradeCount, date) : { bg: 'bg-transparent', text: 'theme-text-secondary' };
-            
+
             return (
               <button
                 key={idx}
                 onClick={() => handleDayClick(date)}
                 disabled={!date}
+                aria-label={date ? `${format(date, 'MMMM d, yyyy')}: ${data?.tradeCount ?? 0} trades, $${data?.pnl ?? 0}` : undefined}
                 className={`
-                  group relative aspect-square p-3 rounded-2xl border transition-all duration-300
+                  group relative min-h-16 sm:aspect-square p-1 sm:p-3 rounded-lg sm:rounded-2xl border transition-all duration-300
                   ${!date ? 'cursor-default invisible' : 'cursor-pointer hover:scale-105 hover:border-opacity-100'}
                   ${!isCurrentMonth ? 'opacity-40' : ''}
                   ${isToday ? 'border-accent ring-4 ring-blue-500/20 shadow-lg' : 'theme-border hover:border-accent/50'}
@@ -272,33 +279,22 @@ export default function ReviewPage() {
                 {date && (
                   <div className="flex flex-col h-full relative z-10">
                     <div className="flex items-center justify-between mb-1">
-                      <div className={`text-base font-bold ${isToday ? 'text-accent' : 'theme-text'}`}>
+                      <div className={`text-xs sm:text-base font-bold ${isToday ? 'text-accent' : 'theme-text'}`}>
                         {format(date, 'd')}
                       </div>
-                      {/* Add Trade Button - appears on hover */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAddTrade(date);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 transition-all duration-200 p-1 rounded-lg bg-accent text-white hover:bg-accent hover:scale-110"
-                        title="Add trade"
-                      >
-                        <PlusIcon className="h-3 w-3" />
-                      </button>
                     </div>
                     {data && data.tradeCount > 0 ? (
                       <div className="mt-auto">
-                        <div className={`text-sm font-bold ${colors.text} mb-0.5`}>
+                        <div className={`text-[10px] sm:text-sm font-bold ${colors.text} mb-0.5`}>
                           {data.pnl > 0 ? '+' : ''}${Math.abs(data.pnl) >= 1000 ? (data.pnl / 1000).toFixed(1) + 'k' : data.pnl.toFixed(0)}
                         </div>
-                        <div className="text-xs theme-text-tertiary font-medium">
+                        <div className="hidden sm:block text-xs theme-text-tertiary font-medium">
                           {data.tradeCount} {data.tradeCount === 1 ? 'trade' : 'trades'}
                         </div>
                       </div>
                     ) : (
                       <div className="mt-auto opacity-0 group-hover:opacity-50 transition-opacity duration-200">
-                        <div className="text-xs theme-text-tertiary font-medium">No trades</div>
+                        <div className="hidden sm:block text-xs theme-text-tertiary font-medium">No trades</div>
                       </div>
                     )}
                   </div>
@@ -327,14 +323,14 @@ export default function ReviewPage() {
             <div className="p-7 border-b theme-border sticky top-0 theme-bg-secondary z-10 backdrop-blur-md">
               <div className="flex items-center justify-between">
                 <div className="flex-1">
-                  <h2 className="text-3xl font-bold theme-text tracking-tight">
+                  <h2 className="text-xl sm:text-3xl font-bold theme-text tracking-tight">
                     {format(selectedDay, 'EEEE, MMMM d, yyyy')}
                   </h2>
                   <div className="mt-3 flex items-center gap-6">
                     <div className={`text-2xl font-bold ${
-                      dayData.pnl > 0 
+                      dayData.pnl > 0
                         ? (showEdgeTrades ? 'text-accent' : 'text-positive')
-                        : dayData.pnl < 0 
+                        : dayData.pnl < 0
                         ? (showEdgeTrades ? 'text-orange-500' : 'text-negative')
                         : 'theme-text'
                     }`}>
@@ -372,8 +368,8 @@ export default function ReviewPage() {
                   <h3 className="font-bold theme-text mb-3 text-lg uppercase tracking-wide">Daily Bias</h3>
                   <div className="flex items-center gap-3 mb-3">
                     <span className={`px-4 py-2 rounded-xl text-sm font-bold uppercase tracking-wide ${
-                      dayData.bias.bias === 'bullish' 
-                        ? (showEdgeTrades 
+                      dayData.bias.bias === 'bullish'
+                        ? (showEdgeTrades
                             ? 'bg-accent/20 text-accent border-2 border-accent/30'
                             : 'bg-positive/20 text-positive border-2 border-positive/30')
                         : dayData.bias.bias === 'bearish'
@@ -454,7 +450,7 @@ export default function ReviewPage() {
                               </span>
                               <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
                                 trade.direction === 'LONG'
-                                  ? (showEdgeTrades 
+                                  ? (showEdgeTrades
                                       ? 'bg-accent/20 text-accent border border-accent/30'
                                       : 'bg-positive/20 text-positive border border-positive/30')
                                   : (showEdgeTrades
@@ -473,7 +469,7 @@ export default function ReviewPage() {
                           </div>
                           <div className="text-right">
                             <div className={`text-2xl font-bold ${
-                              trade.resultUsd >= 0 
+                              trade.resultUsd >= 0
                                 ? (showEdgeTrades ? 'text-accent' : 'text-positive')
                                 : (showEdgeTrades ? 'text-orange-500' : 'text-negative')
                             }`}>

@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppData } from '@/hooks/useAppData';
+import { useUser } from '@clerk/nextjs';
 import type { Trade, Collection } from '@trde/core';
 import { AssetClass } from '@trde/core';
 import Link from 'next/link';
@@ -12,17 +13,28 @@ import { format } from 'date-fns';
 import { sanitizeText } from '@/lib/security/sanitize';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
 import Image from 'next/image';
+import { ModalDialog } from '@/components/ModalDialog';
 import { formatEnum, formatSetupTag } from '@/lib/utils/formatEnum';
 
 export default function TradeDetailPage() {
   const params = useParams();
+  const { user } = useUser();
   const router = useRouter();
-  const { trades, strategies, saveTrades, isLoading } = useAppData();
-  const collections: Collection[] = []; // Collections not yet supported in demo
-  const saveCollections = async () => {}; // Noop for demo
+  const { trades, strategies, collections, saveTrades, isLoading, isDemo } = useAppData();
   const trade = useMemo(() => trades.find((t) => t.id === params.id) || null, [trades, params.id]);
   const [mounted, setMounted] = useState(false);
   const [isEditingAttachments, setIsEditingAttachments] = useState(false);
+  const [attachmentDraft, setAttachmentDraft] = useState<ImageAttachment[]>([]);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [readingImages, setReadingImages] = useState(false);
+  const [previewImage, setPreviewImage] = useState<ImageAttachment | null>(null);
+  useEffect(() => {
+    setIsEditingAttachments(false);
+    setAttachmentDraft([]);
+    setSaveError(null);
+    setPreviewImage(null);
+  }, [params.id, user?.id]);
 
   // Mark EDGE trade as viewed when detail page loads
   useEffect(() => {
@@ -46,15 +58,10 @@ export default function TradeDetailPage() {
   }, [trade, collections]);
 
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
-    
-    return () => clearTimeout(timer);
+    setMounted(true);
   }, []);
 
-  if (!mounted || !trade) {
+  if (!mounted || isLoading) {
     return (
       <div className="space-y-6">
         <SkeletonLoader width="200px" height="2rem" />
@@ -91,11 +98,16 @@ export default function TradeDetailPage() {
     const updatedTrades = trades.map((t) =>
       t.id === trade.id ? { ...t, collections: updated } : t
     );
-    await saveTrades(updatedTrades);
+    setSaving(true);
+    setSaveError(null);
+    try { await saveTrades(updatedTrades); }
+    catch (error) { setSaveError(error instanceof Error ? error.message : 'Unable to save collection. Try again.'); }
+    finally { setSaving(false); }
   };
 
   return (
     <div className="space-y-6">
+      {saveError && <p role="alert" className="text-red-500">{saveError}</p>}
       <div className="flex items-center justify-between">
         <div>
           <Link href="/trades" className="text-accent hover:text-accent dark:hover:text-accent-light mb-2 inline-flex items-center gap-1 text-sm">
@@ -124,16 +136,6 @@ export default function TradeDetailPage() {
             </div>
             {/* Show actual trade execution times for EDGE trades */}
             {(() => {
-              const getCollections = () => {
-                try {
-                  if (typeof window === 'undefined') return [];
-                  const data = localStorage.getItem('trde_collections');
-                  return data ? JSON.parse(data) : [];
-                } catch {
-                  return [];
-                }
-              };
-              const collections = getCollections();
               const edgeCollection = collections.find((c: any) => c.name === 'EDGE');
               const isEdgeTrade = (edgeCollection && trade.collections.includes(edgeCollection.id)) ||
                 trade.notes?.startsWith('[EDGE');
@@ -299,37 +301,50 @@ export default function TradeDetailPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold theme-text">Screenshots</h2>
           <button
-            onClick={() => setIsEditingAttachments(!isEditingAttachments)}
+            disabled={saving || readingImages || isDemo}
+            onClick={async () => {
+              if (!isEditingAttachments) {
+                setAttachmentDraft(trade.attachments || []);
+                setIsEditingAttachments(true);
+                return;
+              }
+              setSaving(true);
+              setSaveError(null);
+              try {
+                await saveTrades(trades.map(t => t.id === trade.id ? { ...t, attachments: attachmentDraft, updatedAt: Date.now() } : t));
+                setIsEditingAttachments(false);
+              } catch (error) { setSaveError(error instanceof Error ? error.message : 'Unable to save screenshots. Try again.'); }
+              finally { setSaving(false); }
+            }}
             className="flex items-center space-x-2 px-3 py-1.5 text-sm theme-bg-tertiary hover:theme-bg-tertiary rounded-lg border theme-border theme-text transition-colors"
           >
             <PencilIcon className="h-4 w-4" />
-            <span>{isEditingAttachments ? 'Done' : 'Edit'}</span>
+            <span>{saving ? 'Saving…' : isEditingAttachments ? 'Save screenshots' : 'Edit'}</span>
           </button>
         </div>
+        {isEditingAttachments && <button disabled={saving || readingImages} onClick={() => setIsEditingAttachments(false)} className="mb-4 theme-text underline">Cancel screenshot changes</button>}
         {isEditingAttachments ? (
           <ImageUpload
-            attachments={trade.attachments || []}
-            onAttachmentsChange={async (attachments) => {
-              const updatedTrades = trades.map((t) =>
-                t.id === trade.id ? { ...t, attachments, updatedAt: Date.now() } : t
-              );
-              await saveTrades(updatedTrades);
-            }}
+            disabled={saving}
+            onBusyChange={setReadingImages}
+            attachments={attachmentDraft}
+            onAttachmentsChange={setAttachmentDraft}
             maxImages={10}
           />
         ) : trade.attachments && trade.attachments.length > 0 ? (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {trade.attachments.map((attachment) => (
               <div key={attachment.id} className="relative group theme-bg-tertiary rounded-lg border theme-border overflow-hidden">
+                <button type="button" className="block w-full" aria-label={`View ${attachment.caption || 'screenshot'}`} onClick={() => setPreviewImage(attachment)}>
                 <Image
                   src={attachment.uri}
                   alt={sanitizeText(attachment.caption) || 'Screenshot'}
                   width={400}
                   height={192}
                   className="w-full h-48 object-cover cursor-pointer"
-                  onClick={() => window.open(attachment.uri, '_blank')}
                   unoptimized
                 />
+                </button>
                 {attachment.caption && (
                   <div className="p-2 bg-black/80 dark:bg-white/80 text-white dark:text-black text-xs">
                     {sanitizeText(attachment.caption)}
@@ -346,10 +361,12 @@ export default function TradeDetailPage() {
       <div className="theme-bg-secondary p-6 rounded-lg border theme-border">
         <h2 className="text-xl font-semibold mb-4 theme-text">Collections</h2>
         <div className="space-y-2">
+          {collections.length === 0 && <p className="theme-text-secondary text-sm">Create a collection in <Link href="/review" className="underline">Review</Link> to organize your trades.</p>}
           {collections.map((collection) => (
             <label key={collection.id} className="flex items-center space-x-3 p-3 theme-bg-tertiary rounded-lg hover:theme-bg-tertiary transition-colors cursor-pointer border theme-border">
               <input
                 type="checkbox"
+                disabled={saving || readingImages || isDemo}
                 checked={trade.collections.includes(collection.id)}
                 onChange={() => toggleCollection(collection.id)}
                 className="w-4 h-4 rounded theme-bg-secondary border-black/20 dark:border-white/20 text-accent focus:ring-accent"
@@ -359,6 +376,15 @@ export default function TradeDetailPage() {
           ))}
         </div>
       </div>
+      {previewImage && <ModalDialog isOpen onClose={() => setPreviewImage(null)} labelledBy="screenshot-preview-title" className="items-center justify-center">
+        <div className="theme-bg-secondary rounded-xl p-4 max-w-5xl w-full max-h-[90dvh] overflow-auto">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <h2 id="screenshot-preview-title" className="theme-text font-semibold">{previewImage.caption || 'Trade screenshot'}</h2>
+            <button onClick={() => setPreviewImage(null)} className="theme-text underline">Close screenshot</button>
+          </div>
+          <Image src={previewImage.uri} alt={previewImage.caption || 'Trade screenshot'} width={1200} height={800} unoptimized className="w-full h-auto object-contain" />
+        </div>
+      </ModalDialog>}
     </div>
   );
 }

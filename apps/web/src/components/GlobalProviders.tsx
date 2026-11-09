@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, createContext, useContext, ReactNode } from 'react';
+import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { usePathname } from 'next/navigation';
@@ -54,6 +54,11 @@ export function GlobalProviders({ children }: GlobalProvidersProps) {
     setIsShortcutsHelpOpen(true);
   }, []);
   const closeShortcutsHelp = useCallback(() => setIsShortcutsHelpOpen(false), []);
+
+  useEffect(() => {
+    setIsCommandPaletteOpen(false);
+    setIsShortcutsHelpOpen(false);
+  }, [pathname]);
 
   // Check if we're on a dashboard route
   const isDashboardRoute = pathname?.startsWith('/app') || 

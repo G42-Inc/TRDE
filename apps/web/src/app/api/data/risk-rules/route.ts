@@ -1,6 +1,8 @@
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
+import { saveUserRiskRules } from '@/lib/journal/risk-rules';
 import type { RiskRules } from '@trde/core';
 
 /**
@@ -42,8 +44,8 @@ export async function GET(request: NextRequest) {
       dailyLossLimitUsd: data.daily_loss_limit_usd,
       maxTradesPerDay: data.max_trades_per_day,
       maxContractsPerTrade: data.max_contracts_per_trade,
-      stopAfterConsecutiveLosses: data.stop_after_consecutive_losses || undefined,
-      stopAfterDownR: data.stop_after_down_r || undefined,
+      stopAfterConsecutiveLosses: data.stop_after_consecutive_losses ?? undefined,
+      stopAfterDownR: data.stop_after_down_r ?? undefined,
       requirePlannedRisk: data.require_planned_risk || false,
       requireStopDefined: data.require_stop_defined || false,
     };
@@ -74,6 +76,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const demo = await checkDemoStatus(userId);
+    if (demo.error) return NextResponse.json({ error: 'Could not verify journal access. Please retry.' }, { status: 503 });
+    if (demo.isDemo) return createDemoBlockedResponse('saving journal data');
+
     const body = await request.json();
     const { riskRules } = body;
 
@@ -86,33 +92,7 @@ export async function POST(request: NextRequest) {
 
     const supabase = getSupabaseServiceClient();
     
-    const dbRiskRules = {
-      id: `risk-rules-${userId}`,
-      user_id: userId,
-      daily_loss_limit_usd: riskRules.dailyLossLimitUsd,
-      max_trades_per_day: riskRules.maxTradesPerDay,
-      max_contracts_per_trade: riskRules.maxContractsPerTrade,
-      stop_after_consecutive_losses: riskRules.stopAfterConsecutiveLosses || null,
-      stop_after_down_r: riskRules.stopAfterDownR || null,
-      require_planned_risk: riskRules.requirePlannedRisk || false,
-      require_stop_defined: riskRules.requireStopDefined || false,
-      updated_at: Date.now(),
-      metadata: {},
-    };
-
-    const { error } = await supabase
-      .from('risk_rules')
-      .upsert(dbRiskRules, {
-        onConflict: 'user_id',
-      });
-
-    if (error) {
-      console.error('Error saving risk rules:', error);
-      return NextResponse.json(
-        { error: 'Failed to save risk rules' },
-        { status: 500 }
-      );
-    }
+    await saveUserRiskRules(supabase, userId, riskRules);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

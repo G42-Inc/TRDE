@@ -21,6 +21,7 @@ interface SimulationPanelProps {
   onReset: () => void;
   onUpdateSettings: (settings: Partial<SimSettings>) => void;
   onSaveToJournal: () => void;
+  journalSaving?: boolean;
   position: PanelPosition;
   onPositionChange: (position: PanelPosition) => void;
 }
@@ -38,6 +39,7 @@ export function SimulationPanel({
   onReset,
   onUpdateSettings,
   onSaveToJournal,
+  journalSaving = false,
   position,
   onPositionChange,
 }: SimulationPanelProps) {
@@ -370,9 +372,10 @@ export function SimulationPanel({
           {session.closedTrades.length > 0 && (
             <button
               onClick={onSaveToJournal}
-              className="px-2 py-1 bg-accent hover:bg-accent-dark text-white rounded text-xs transition-colors"
+              disabled={journalSaving}
+              className="px-2 py-1 bg-accent hover:bg-accent-dark text-white rounded text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save to Journal
+              {journalSaving ? 'Saving…' : 'Save to Journal'}
             </button>
           )}
         </div>

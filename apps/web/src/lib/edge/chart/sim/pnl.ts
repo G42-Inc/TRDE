@@ -89,7 +89,8 @@ export function calculateTotalPnL(
   const realizedUsd = closedTrades.reduce((sum, trade) => sum + trade.netUsd, 0);
   
   // Total fees paid
-  const feesPaid = closedTrades.reduce((sum, trade) => sum + trade.feesUsd, 0);
+  const entryFees = position.entryFeesUsd ?? 0;
+  const feesPaid = closedTrades.reduce((sum, trade) => sum + trade.feesUsd, 0) + entryFees;
   
   return {
     unrealizedTicks: unrealized.ticks,
@@ -97,7 +98,7 @@ export function calculateTotalPnL(
     realizedTicks,
     realizedUsd,
     totalTicks: unrealized.ticks + realizedTicks,
-    totalUsd: unrealized.usd + realizedUsd,
+    totalUsd: unrealized.usd + realizedUsd - entryFees,
     feesPaid,
   };
 }

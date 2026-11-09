@@ -4,6 +4,7 @@ import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
 import type { UserPreferences, UserPreferencesInput } from '@/lib/engagement/types';
 import { checkRateLimit, RATE_LIMITS, createRateLimitResponse } from '@/lib/utils/rate-limit';
 import { apiLogger } from '@/lib/utils/logger';
+import { UserPreferencesSchema } from '@/lib/validation/preferences';
 
 /**
  * GET /api/preferences
@@ -90,7 +91,9 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const body: UserPreferencesInput = await request.json();
+    const parsed = UserPreferencesSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return NextResponse.json({ error: 'Invalid preferences' }, { status: 400 });
+    const body: UserPreferencesInput = parsed.data;
     const supabase = getSupabaseServiceClient();
 
     // Ensure profile exists first (handles race condition with webhook)
@@ -111,6 +114,7 @@ export async function PUT(request: NextRequest) {
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'user_id',
+          ignoreDuplicates: true,
         });
 
       if (profileError) {
@@ -193,6 +197,7 @@ export async function PUT(request: NextRequest) {
               updated_at: new Date().toISOString(),
             }, {
               onConflict: 'user_id',
+              ignoreDuplicates: true,
             })
             .select();
           
@@ -228,7 +233,6 @@ export async function PUT(request: NextRequest) {
       .upsert({
         user_id: userId,
         ...updateData,
-        created_at: new Date().toISOString(),
       }, {
         onConflict: 'user_id',
       })

@@ -1,5 +1,8 @@
 'use client';
 
+import { ModalDialog } from '@/components/ModalDialog';
+
+import { useToast } from '@/contexts/ToastContext';
 import { useState, useEffect } from 'react';
 import { useAppData } from '@/hooks/useAppData';
 import { calculateDisciplineScore, calculateRiskCreep } from '@trde/core';
@@ -179,21 +182,28 @@ export default function RiskPage() {
 }
 
 function RuleViolationsSection({ violations, trades, router, onViolationReviewed, onSaveViolations }: { violations: RuleViolation[]; trades: Trade[]; router: ReturnType<typeof useRouter>; onViolationReviewed: () => void; onSaveViolations: (violations: RuleViolation[]) => Promise<void> }) {
+  const { showToast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [reviewingViolation, setReviewingViolation] = useState<RuleViolation | null>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [showAllViolations, setShowAllViolations] = useState(false);
   
   const unreviewedViolations = violations.filter(v => !v.reviewed);
   const reviewedViolations = violations.filter(v => v.reviewed).sort((a, b) => (b.reviewedAt || b.createdAt) - (a.reviewedAt || a.createdAt));
-  const displayedViolations = showAllViolations ? violations.sort((a, b) => b.createdAt - a.createdAt) : unreviewedViolations;
+  const displayedViolations = showAllViolations ? [...violations].sort((a, b) => b.createdAt - a.createdAt) : unreviewedViolations;
   
   const handleReview = (violation: RuleViolation) => {
+    setSaveError(null);
     setReviewingViolation(violation);
     setReviewNotes(violation.reviewNotes || '');
   };
   
   const handleSaveReview = async () => {
-    if (!reviewingViolation) return;
+    if (saving || !reviewingViolation) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
     
     const updatedViolations = violations.map(v => 
       v.id === reviewingViolation.id
@@ -205,10 +215,18 @@ function RuleViolationsSection({ violations, trades, router, onViolationReviewed
     setReviewingViolation(null);
     setReviewNotes('');
     onViolationReviewed();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save review.';
+      setSaveError(message);
+      showToast(message, 'error');
+    } finally { setSaving(false); }
   };
   
   const handleUpdateReview = async () => {
-    if (!reviewingViolation) return;
+    if (saving || !reviewingViolation) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
     
     const updatedViolations = violations.map(v => 
       v.id === reviewingViolation.id
@@ -220,6 +238,11 @@ function RuleViolationsSection({ violations, trades, router, onViolationReviewed
     setReviewingViolation(null);
     setReviewNotes('');
     onViolationReviewed();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save review.';
+      setSaveError(message);
+      showToast(message, 'error');
+    } finally { setSaving(false); }
   };
   
   if (violations.length === 0) {
@@ -408,18 +431,16 @@ function RuleViolationsSection({ violations, trades, router, onViolationReviewed
       </div>
       
       {reviewingViolation && (
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in"
-          onClick={() => setReviewingViolation(null)}
-        >
+        <ModalDialog isOpen onClose={() => setReviewingViolation(null)} labelledBy="risk-dialog-1" className="items-center justify-center">
           <div
-            className="theme-bg-secondary p-8 rounded-2xl max-w-2xl w-full border theme-border animate-scale-in"
+            className="theme-bg-secondary p-8 rounded-2xl max-w-2xl w-full border theme-border animate-scale-in max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ boxShadow: 'var(--shadow-2xl)' }}
           >
+            {saveError && <p role="alert" className="m-4 rounded-lg border border-red-500/40 bg-red-950 p-3 text-sm text-red-100">{saveError}</p>}
             <div className="flex items-center justify-between mb-6 border-b theme-border pb-5">
-              <h3 className="text-2xl font-bold theme-text">Review Rule Violation</h3>
-              <button
+              <h3 id="risk-dialog-1" className="text-2xl font-bold theme-text">Review Rule Violation</h3>
+              <button aria-label="Close dialog"
                 onClick={() => setReviewingViolation(null)}
                 className="theme-text-secondary hover:theme-text transition-all duration-200 hover:scale-110 active:scale-95 p-2 rounded-full hover:bg-danger/10"
               >
@@ -518,10 +539,10 @@ function RuleViolationsSection({ violations, trades, router, onViolationReviewed
               </div>
               
               <div>
-                <label className="block text-sm font-medium theme-text-secondary mb-2">
+                <label htmlFor="risk-field-1" className="block text-sm font-medium theme-text-secondary mb-2">
                   What happened and how will you improve?
                 </label>
-                <textarea
+                <textarea id="risk-field-1"
                   value={reviewNotes}
                   onChange={(e) => setReviewNotes(e.target.value)}
                   className="w-full theme-bg-tertiary border theme-border theme-text rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
@@ -536,6 +557,7 @@ function RuleViolationsSection({ violations, trades, router, onViolationReviewed
                 <>
                   <button
                     onClick={handleUpdateReview}
+                    disabled={saving}
                     className="flex-1 px-4 py-2.5 bg-accent text-white rounded-lg hover:bg-accent-dark font-medium transition-colors"
                   >
                     Update Review
@@ -551,7 +573,7 @@ function RuleViolationsSection({ violations, trades, router, onViolationReviewed
                 <>
                   <button
                     onClick={handleSaveReview}
-                    disabled={!reviewNotes.trim()}
+                    disabled={saving || !reviewNotes.trim()}
                     className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Mark as Reviewed
@@ -566,7 +588,7 @@ function RuleViolationsSection({ violations, trades, router, onViolationReviewed
               )}
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
     </>
   );
@@ -754,18 +776,15 @@ function DisciplineScoreCard({
       </div>
 
       {showInfoModal && (
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fade-in"
-          onClick={() => setShowInfoModal(false)}
-        >
+        <ModalDialog isOpen onClose={() => setShowInfoModal(false)} labelledBy="risk-dialog-2" className="items-center justify-center">
           <div
-            className="theme-bg-secondary p-8 rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto border theme-border animate-scale-in"
+            className="theme-bg-secondary p-8 rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto border theme-border animate-scale-in max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ boxShadow: 'var(--shadow-2xl)' }}
           >
             <div className="flex items-center justify-between mb-6 border-b theme-border pb-5">
-              <h3 className="text-2xl font-bold theme-text">Discipline Score</h3>
-              <button
+              <h3 id="risk-dialog-2" className="text-2xl font-bold theme-text">Discipline Score</h3>
+              <button aria-label="Close dialog"
                 onClick={() => setShowInfoModal(false)}
                 className="theme-text-secondary hover:theme-text transition-all duration-200 hover:scale-110 active:scale-95 p-2 rounded-full hover:bg-accent/10"
               >
@@ -817,7 +836,7 @@ function DisciplineScoreCard({
               </div>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
     </>
   );

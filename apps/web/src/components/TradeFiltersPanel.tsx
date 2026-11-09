@@ -1,9 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { TradeFilters, SavedFilter } from '@trde/core';
 import { AssetClass, Outcome, Grade, Session, MarketRegime } from '@trde/core';
-import { useStorage } from '@/contexts/StorageContext';
+import { useAppData } from '@/hooks/useAppData';
+import { useToast } from '@/contexts/ToastContext';
+import { ModalDialog } from '@/components/ModalDialog';
 
 interface TradeFiltersPanelProps {
   filters: TradeFilters;
@@ -11,7 +14,10 @@ interface TradeFiltersPanelProps {
 }
 
 export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPanelProps) {
-  const { savedFilters, saveSavedFilters } = useStorage();
+  const { savedFilters, saveSavedFilters, isDemo } = useAppData();
+  const { showToast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState('');
 
@@ -31,10 +37,13 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
   };
 
   const saveCurrentFilter = async () => {
-    if (!saveName.trim()) return;
+    if (saving || !saveName.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
     const newFilter: SavedFilter = {
-      id: `filter-${Date.now()}`,
-      name: saveName,
+      id: `filter-${crypto.randomUUID()}`,
+      name: saveName.trim(),
       filters: { ...filters },
       createdAt: Date.now(),
     };
@@ -42,6 +51,11 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
     await saveSavedFilters(updated);
     setSaveName('');
     setShowSaveDialog(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save filter.';
+      setSaveError(message);
+      showToast(message, 'error');
+    } finally { setSaving(false); }
   };
 
   return (
@@ -50,7 +64,7 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
         <h2 className="text-lg font-semibold">Filters</h2>
         <button
           onClick={clearFilters}
-          className="text-sm text-primary-600 hover:text-primary-700"
+          className="text-sm text-accent hover:underline"
         >
           Clear
         </button>
@@ -58,11 +72,11 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="filter-asset" className="block text-sm font-medium theme-text-secondary mb-1">
             Asset Class
           </label>
-          <select
-            className="w-full border border-gray-300 rounded-md px-3 py-2"
+          <select id="filter-asset"
+            className="w-full theme-bg-secondary theme-text border theme-border rounded-md px-3 py-2"
             value={filters.assetClass?.[0] || ''}
             onChange={(e) => {
               const value = e.target.value;
@@ -76,11 +90,11 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="filter-outcome" className="block text-sm font-medium theme-text-secondary mb-1">
             Outcome
           </label>
-          <select
-            className="w-full border border-gray-300 rounded-md px-3 py-2"
+          <select id="filter-outcome"
+            className="w-full theme-bg-secondary theme-text border theme-border rounded-md px-3 py-2"
             value={filters.outcome?.[0] || ''}
             onChange={(e) => {
               const value = e.target.value;
@@ -95,11 +109,11 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="filter-grade" className="block text-sm font-medium theme-text-secondary mb-1">
             Grade
           </label>
-          <select
-            className="w-full border border-gray-300 rounded-md px-3 py-2"
+          <select id="filter-grade"
+            className="w-full theme-bg-secondary theme-text border theme-border rounded-md px-3 py-2"
             value={filters.grade?.[0] || ''}
             onChange={(e) => {
               const value = e.target.value;
@@ -121,11 +135,11 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="filter-session" className="block text-sm font-medium theme-text-secondary mb-1">
             Session
           </label>
-          <select
-            className="w-full border border-gray-300 rounded-md px-3 py-2"
+          <select id="filter-session"
+            className="w-full theme-bg-secondary theme-text border theme-border rounded-md px-3 py-2"
             value={filters.session?.[0] || ''}
             onChange={(e) => {
               const value = e.target.value;
@@ -140,11 +154,11 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="filter-review" className="block text-sm font-medium theme-text-secondary mb-1">
             Review Flag
           </label>
-          <select
-            className="w-full border border-gray-300 rounded-md px-3 py-2"
+          <select id="filter-review"
+            className="w-full theme-bg-secondary theme-text border theme-border rounded-md px-3 py-2"
             value={filters.reviewFlag === undefined ? '' : filters.reviewFlag.toString()}
             onChange={(e) => {
               const value = e.target.value;
@@ -163,7 +177,7 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
           <h3 className="text-sm font-semibold">Saved Filters</h3>
           <button
             onClick={() => setShowSaveDialog(true)}
-            className="text-xs text-primary-600 hover:text-primary-700"
+            className="text-xs text-accent hover:underline"
           >
             + Save
           </button>
@@ -173,7 +187,7 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
             <button
               key={sf.id}
               onClick={() => loadSavedFilter(sf)}
-              className="w-full text-left px-2 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded"
+              className="w-full text-left px-2 py-1 text-sm theme-text-secondary hover:bg-gray-100 rounded"
             >
               {sf.name}
             </button>
@@ -182,20 +196,24 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
       </div>
 
       {showSaveDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <ModalDialog isOpen={showSaveDialog} onClose={() => setShowSaveDialog(false)} labelledBy="save-filter-title" className="items-center justify-center">
           <div className="glass-surface-strong p-4 rounded-lg">
-            <h3 className="font-semibold mb-2">Save Filter</h3>
+            <h3 id="save-filter-title" className="font-semibold mb-2">Save Filter</h3>
+            {isDemo && <p className="mb-3 text-sm theme-text">Demo filters are read-only. <Link href="/pricing" className="text-accent underline">Upgrade to save filters</Link>.</p>}
             <input
               type="text"
               value={saveName}
               onChange={(e) => setSaveName(e.target.value)}
               placeholder="Filter name"
-              className="w-full border border-gray-300 rounded-md px-3 py-2 mb-2"
+              aria-label="Filter name"
+              className="w-full theme-bg-secondary theme-text border theme-border rounded-md px-3 py-2 mb-2"
             />
+            {saveError && <p role="alert" className="mb-3 text-sm text-negative">{saveError}</p>}
             <div className="flex space-x-2">
               <button
                 onClick={saveCurrentFilter}
-                className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700"
+                disabled={isDemo || saving || !saveName.trim()}
+                className="px-4 py-2 bg-accent text-white rounded-md hover:bg-primary-700"
               >
                 Save
               </button>
@@ -204,13 +222,13 @@ export function TradeFiltersPanel({ filters, onFiltersChange }: TradeFiltersPane
                   setShowSaveDialog(false);
                   setSaveName('');
                 }}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
+                className="px-4 py-2 bg-gray-200 theme-text-secondary rounded-md hover:bg-gray-300"
               >
                 Cancel
               </button>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
     </div>
   );

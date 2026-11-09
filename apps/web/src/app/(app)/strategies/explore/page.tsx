@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { searchPublicStrategies, type PublicStrategyCard } from '@/lib/actions/strategies.server';
 import { StrategyCard } from '@/components/strategies/StrategyCard';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
@@ -16,10 +16,14 @@ export default function ExploreStrategiesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [activeSort, setActiveSort] = useState<SortOption>('top');
+  const requestRef = useRef(0);
+  const [error, setError] = useState<string | null>(null);
   const [allTags, setAllTags] = useState<string[]>([]);
 
   const loadStrategies = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
+    setError(null);
     try {
       const result = await searchPublicStrategies({
         query: searchQuery || undefined,
@@ -28,7 +32,9 @@ export default function ExploreStrategiesPage() {
         limit: 50,
       });
 
-      if (result.success && result.strategies) {
+      if (request !== requestRef.current) return;
+      if (!result.success) throw new Error('Could not load strategies. Please try again.');
+      if (result.strategies) {
         setStrategies(result.strategies);
         
         // Extract unique tags
@@ -36,17 +42,20 @@ export default function ExploreStrategiesPage() {
         result.strategies.forEach((s) => {
           s.tags?.forEach((tag) => uniqueTags.add(tag));
         });
-        setAllTags(Array.from(uniqueTags).sort());
+        setAllTags(Array.from(new Set([...selectedTags, ...uniqueTags])).sort());
       }
     } catch (error) {
-      console.error('Error loading strategies:', error);
+      if (request === requestRef.current) setError('Could not load strategies. Please try again.');
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
   }, [activeSort, searchQuery, selectedTags]);
 
   useEffect(() => {
-    loadStrategies();
+    requestRef.current += 1;
+    setLoading(true);
+    const timer = setTimeout(loadStrategies, 200);
+    return () => { clearTimeout(timer); requestRef.current += 1; };
   }, [loadStrategies]);
 
   const toggleTag = (tag: string) => {
@@ -67,7 +76,7 @@ export default function ExploreStrategiesPage() {
         </button>
         <div className="flex-1">
           <h1 className="text-3xl font-bold theme-text">Explore Strategies</h1>
-          <p className="theme-text-secondary mt-1">Discover community strategies from verified traders</p>
+          <p className="theme-text-secondary mt-1">Discover strategies shared by the community</p>
         </div>
       </div>
 
@@ -80,7 +89,7 @@ export default function ExploreStrategiesPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search strategies by title, summary, or tags..."
+            placeholder="Search titles and summaries..."
             className="w-full pl-10 pr-4 py-3 theme-bg-secondary border theme-border theme-text rounded-lg focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
@@ -132,7 +141,12 @@ export default function ExploreStrategiesPage() {
       </div>
 
       {/* Results */}
-      {loading ? (
+      {error ? (
+        <div role="alert" className="theme-bg-secondary border theme-border p-6 rounded-lg">
+          <p className="theme-text">{error}</p>
+          <button onClick={loadStrategies} className="mt-3 text-accent underline">Retry</button>
+        </div>
+      ) : loading ? (
         <div className="space-y-4">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} className="theme-bg p-4 rounded-lg border theme-border">

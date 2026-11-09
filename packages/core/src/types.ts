@@ -383,6 +383,7 @@ export interface SavedFilter {
 
 // Trade Filters
 export interface TradeFilters {
+  edgeOnly?: boolean;
   assetClass?: AssetClass[];
   dateRange?: { start: string; end: string };
   outcome?: Outcome[];

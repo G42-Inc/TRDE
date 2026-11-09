@@ -67,12 +67,13 @@ async function getCurrentUserId(): Promise<string> {
 
 async function ensurePublicProfile(userId: string, username?: string): Promise<void> {
   const supabase = getSupabaseServiceClient();
-  const defaultUsername = username || `user_${userId.substring(0, 8)}`;
-  await supabase.from('public_profiles').upsert({
+  const defaultUsername = username || `user_${userId.replace(/^user_/, '')}`;
+  const { error } = await supabase.from('public_profiles').upsert({
     user_id: userId,
     username: defaultUsername,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'user_id' });
+  if (error) throw new Error('Could not prepare your public profile. Please try again.');
 }
 
 export async function createStrategy(data: {
@@ -177,7 +178,9 @@ export async function searchPublicStrategies(params: {
     let query = supabase.from('public_strategy_cards').select('*');
     if (params.query) {
       const searchTerm = params.query.toLowerCase();
-      query = query.or(`title.ilike.%${searchTerm}%,summary.ilike.%${searchTerm}%`);
+      // Quote reserved PostgREST punctuation; the client handles URL encoding.
+      const pattern = JSON.stringify(`%${searchTerm}%`);
+      query = query.or(`title.ilike.${pattern},summary.ilike.${pattern}`);
     }
     if (params.tags && params.tags.length > 0) {
       query = query.contains('tags', params.tags);

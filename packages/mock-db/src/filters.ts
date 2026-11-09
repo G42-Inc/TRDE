@@ -1,8 +1,11 @@
 import type { Trade, TradeFilters, SavedFilter } from '@trde/core';
 import { AssetClass, Outcome, Grade, Session, MarketRegime } from '@trde/core';
 
-export function filterTrades(trades: Trade[], filters: TradeFilters): Trade[] {
+export function filterTrades(trades: Trade[], filters: TradeFilters, edgeCollectionId?: string): Trade[] {
   return trades.filter((trade) => {
+    if (filters.edgeOnly && !trade.notes?.startsWith('[EDGE') &&
+        !(edgeCollectionId && trade.collections.includes(edgeCollectionId))) return false;
+
     if (filters.assetClass && filters.assetClass.length > 0) {
       if (!filters.assetClass.includes(trade.assetClass)) return false;
     }

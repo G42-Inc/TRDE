@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { addDays, format } from 'date-fns';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { readEdgeStorage, removeEdgeStorage } from '@/lib/edge/store/accountScope';
 import { useAppData } from '@/hooks/useAppData';
 import { AssetClass, Direction, Grade, Session, MarketRegime, MarketHoursTag, SetupTag, NewsTag, RthEth, FuturesInstrument, OptionsUnderlying, OptionType, FUTURES_GROUPS } from '@trde/core';
 import type { Trade, FuturesTrade, OptionsTrade } from '@trde/core';
@@ -18,8 +19,7 @@ export default function NewTradePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { showToast } = useToast();
-  const { trades, strategies, riskRules, saveTrades, isLoading } = useAppData();
-  const versions: any[] = []; // Versions not yet supported in demo
+  const { trades, strategies, versions, riskRules, saveTrades, isLoading } = useAppData();
   const [mounted, setMounted] = useState(false);
   const [importedFutures, setImportedFutures] = useState<FuturesCalculationReference>();
   const [assetClass, setAssetClass] = useState<AssetClass>(AssetClass.FUTURES);
@@ -56,17 +56,15 @@ export default function NewTradePage() {
     exitPremium: 6,
   });
 
+  const [saving, setSaving] = useState(false);
+  const [readingImages, setReadingImages] = useState(false);
+
   const updateFormData = (changes: Partial<typeof formData>) => {
     setFormData((previous) => ({ ...previous, ...changes }));
   };
 
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
-    
-    return () => clearTimeout(timer);
+    setMounted(true);
   }, []);
 
   // Check for imported trade data from EDGE or date from calendar
@@ -83,7 +81,7 @@ export default function NewTradePage() {
     // Check for imported trade data from EDGE
     const importParam = searchParams.get('import');
     if (importParam === 'edge') {
-      const importedData = localStorage.getItem('trde:importTrade');
+      const importedData = readEdgeStorage('edge:importTrade');
       if (importedData) {
         try {
           const data = JSON.parse(importedData);
@@ -112,10 +110,11 @@ export default function NewTradePage() {
             });
           }
           // Clear the imported data after using it
-          localStorage.removeItem('trde:importTrade');
+          removeEdgeStorage('edge:importTrade');
           showToast('Trade data imported from EDGE. Please review and complete the form.', 'info');
         } catch (error) {
-          console.error('Failed to parse imported trade data:', error);
+          removeEdgeStorage('edge:importTrade');
+          showToast('The staged EDGE trade could not be loaded. Import it again.', 'error');
         }
       }
     }
@@ -132,7 +131,7 @@ export default function NewTradePage() {
         <div className="theme-bg-secondary p-6 rounded-xl border theme-border space-y-6">
           <SkeletonLoader width="150px" height="1.5rem" />
           <SkeletonLoader width="100%" height="1rem" lines={12} />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <SkeletonLoader width="100%" height="3rem" />
             <SkeletonLoader width="100%" height="3rem" />
           </div>
@@ -144,10 +143,12 @@ export default function NewTradePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving || readingImages) return;
     const now = Date.now();
     const entryTime = new Date(`${formData.tradeDate}T${formData.entryTime}:00`).getTime();
     const exitTime = new Date(`${formData.tradeDate}T${formData.exitTime}:00`).getTime();
 
+    setSaving(true);
     try {
       let newTrade: Trade;
 
@@ -269,7 +270,7 @@ export default function NewTradePage() {
       router.push(`/trades/${newTrade.id}`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Unable to save trade. Please try again.', 'error');
-    }
+    } finally { setSaving(false); }
   };
 
   const toggleSetupTag = (tag: SetupTag) => {
@@ -305,7 +306,7 @@ export default function NewTradePage() {
         </div>
       </div>
       
-      <form onSubmit={handleSubmit} className="p-8 rounded-2xl space-y-8" style={{
+      <form onSubmit={handleSubmit} className="p-4 sm:p-8 rounded-2xl space-y-8" style={{
         background: 'rgba(255,255,255,0.06)',
         backdropFilter: 'blur(16px) saturate(160%)',
         WebkitBackdropFilter: 'blur(16px) saturate(160%)',
@@ -313,7 +314,7 @@ export default function NewTradePage() {
         boxShadow: '0 4px 24px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.08)',
       }}>
         {/* Asset Class Selection - Enhanced */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button
             type="button"
             onClick={() => setAssetClass(AssetClass.FUTURES)}
@@ -370,7 +371,7 @@ export default function NewTradePage() {
             
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Trade Date</label>
-              <input
+              <input aria-label="Trade Date"
                 type="date"
                 value={formData.tradeDate}
                 onChange={(e) => updateFormData({ tradeDate: e.target.value })}
@@ -379,10 +380,10 @@ export default function NewTradePage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Entry Time</label>
-                <input
+                <input aria-label="Entry Time"
                   type="time"
                   value={formData.entryTime}
                   onChange={(e) => updateFormData({ entryTime: e.target.value })}
@@ -392,7 +393,7 @@ export default function NewTradePage() {
               </div>
               <div>
                 <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Exit Time</label>
-                <input
+                <input aria-label="Exit Time"
                   type="time"
                   value={formData.exitTime}
                   onChange={(e) => updateFormData({ exitTime: e.target.value })}
@@ -404,7 +405,7 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-3 uppercase tracking-wide">Direction</label>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
                   type="button"
                   onClick={() => updateFormData({ direction: Direction.LONG })}
@@ -454,7 +455,7 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Quantity</label>
-              <input
+              <input aria-label="Quantity"
                 type="number"
                 value={formData.quantity}
                 onChange={(e) => updateFormData({ quantity: parseInt(e.target.value) || 1 })}
@@ -466,7 +467,7 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Planned Risk (USD)</label>
-              <input
+              <input aria-label="Planned Risk (USD)"
                 type="number"
                 value={formData.plannedRiskUsd}
                 onChange={(e) => updateFormData({ plannedRiskUsd: parseFloat(e.target.value) || 0 })}
@@ -507,7 +508,7 @@ export default function NewTradePage() {
               <>
                 <div>
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Instrument</label>
-                  <select
+                  <select aria-label="Instrument"
                     value={formData.instrumentRoot}
                     onChange={(e) => updateFormData({ instrumentRoot: e.target.value as FuturesInstrument, tickSize: undefined, tickValueUsd: undefined })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -555,10 +556,10 @@ export default function NewTradePage() {
                 </div>
                 <FuturesTickFields instrumentRoot={formData.instrumentRoot} tickSize={formData.tickSize}
                   tickValueUsd={formData.tickValueUsd} onChange={updateFormData} />
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Entry Price</label>
-                    <input
+                    <input aria-label="Entry Price"
                       type="number"
                       value={formData.entryPrice}
                       onChange={(e) => updateFormData({ entryPrice: parseFloat(e.target.value) || 0 })}
@@ -568,7 +569,7 @@ export default function NewTradePage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Exit Price</label>
-                    <input
+                    <input aria-label="Exit Price"
                       type="number"
                       value={formData.exitPrice}
                       onChange={(e) => updateFormData({ exitPrice: parseFloat(e.target.value) || 0 })}
@@ -582,7 +583,7 @@ export default function NewTradePage() {
               <>
                 <div>
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Underlying</label>
-                  <select
+                  <select aria-label="Underlying"
                     value={formData.underlying}
                     onChange={(e) => updateFormData({ underlying: e.target.value as OptionsUnderlying })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -593,10 +594,10 @@ export default function NewTradePage() {
                     ))}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strike</label>
-                    <input
+                    <input aria-label="Strike"
                       type="number"
                       value={formData.strike}
                       onChange={(e) => updateFormData({ strike: parseFloat(e.target.value) || 0 })}
@@ -606,7 +607,7 @@ export default function NewTradePage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Type</label>
-                    <select
+                    <select aria-label="Type"
                       value={formData.optionType}
                       onChange={(e) => updateFormData({ optionType: e.target.value as OptionType })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -616,10 +617,10 @@ export default function NewTradePage() {
                     </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Expiration</label>
-                    <input
+                    <input aria-label="Expiration"
                       type="date"
                       value={formData.expiration}
                       onChange={(e) => updateFormData({ expiration: e.target.value })}
@@ -628,7 +629,7 @@ export default function NewTradePage() {
                   </div>
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Entry Premium</label>
-                    <input
+                    <input aria-label="Entry Premium"
                       type="number"
                       value={formData.entryPremium}
                       onChange={(e) => updateFormData({ entryPremium: parseFloat(e.target.value) || 0 })}
@@ -639,7 +640,7 @@ export default function NewTradePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Exit Premium</label>
-                  <input
+                  <input aria-label="Exit Premium"
                     type="number"
                     value={formData.exitPremium}
                     onChange={(e) => updateFormData({ exitPremium: parseFloat(e.target.value) || 0 })}
@@ -652,7 +653,7 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy (optional)</label>
-              <select
+              <select aria-label="Strategy (optional)"
                 value={formData.strategyId}
                 onChange={(e) => updateFormData({ strategyId: e.target.value, strategyVersionId: '' })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -667,7 +668,7 @@ export default function NewTradePage() {
             {strategyVersions.length > 0 && (
               <div>
                 <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy Version (optional)</label>
-                <select
+                <select aria-label="Strategy Version (optional)"
                   value={formData.strategyVersionId}
                   onChange={(e) => updateFormData({ strategyVersionId: e.target.value })}
                   className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -682,7 +683,7 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Grade</label>
-              <select
+              <select aria-label="Grade"
                 value={formData.grade}
                 onChange={(e) => updateFormData({ grade: e.target.value as Grade })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -742,7 +743,7 @@ export default function NewTradePage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div>
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Session</label>
-            <select
+            <select aria-label="Session"
               value={formData.session}
               onChange={(e) => updateFormData({ session: e.target.value as Session })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -754,7 +755,7 @@ export default function NewTradePage() {
           </div>
           <div>
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Market Regime</label>
-            <select
+            <select aria-label="Market Regime"
               value={formData.marketRegime}
               onChange={(e) => updateFormData({ marketRegime: e.target.value as MarketRegime })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -766,7 +767,7 @@ export default function NewTradePage() {
           </div>
           <div>
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Market Hours</label>
-            <select
+            <select aria-label="Market Hours"
               value={formData.marketHoursTag}
               onChange={(e) => updateFormData({ marketHoursTag: e.target.value as MarketHoursTag })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
@@ -781,7 +782,7 @@ export default function NewTradePage() {
         {/* Notes */}
         <div>
           <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Notes</label>
-          <textarea
+          <textarea aria-label="Notes"
             value={formData.notes}
             onChange={(e) => updateFormData({ notes: e.target.value })}
             className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium resize-none"
@@ -792,15 +793,18 @@ export default function NewTradePage() {
 
         {/* Screenshots */}
         <ImageUpload
+          disabled={saving}
+          onBusyChange={setReadingImages}
           attachments={formData.attachments}
           onAttachmentsChange={(attachments) => updateFormData({ attachments })}
           maxImages={10}
         />
 
         {/* Actions - Enhanced */}
-        <div className="flex space-x-4 pt-6 border-t-2 theme-border">
+        <div className="flex flex-col sm:flex-row gap-3 pt-6 border-t-2 theme-border">
           <button
             type="submit"
+            disabled={saving || readingImages}
             className="flex-1 px-8 py-4 rounded-xl font-bold text-lg theme-text transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
             style={{
               background: 'rgba(255,255,255,0.10)',
@@ -810,7 +814,7 @@ export default function NewTradePage() {
               boxShadow: '0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.2)',
             }}
           >
-            Create Trade
+            {saving ? 'Saving…' : readingImages ? 'Loading screenshots…' : 'Create Trade'}
           </button>
           <button
             type="button"

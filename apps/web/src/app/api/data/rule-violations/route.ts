@@ -1,3 +1,4 @@
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
 import { saveOwnedRecords, RecordConflictError, InvalidRecordError } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
@@ -70,6 +71,10 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const demo = await checkDemoStatus(userId);
+    if (demo.error) return NextResponse.json({ error: 'Could not verify journal access. Please retry.' }, { status: 503 });
+    if (demo.isDemo) return createDemoBlockedResponse('saving journal data');
 
     const body = await request.json();
     const { ruleViolations } = body;

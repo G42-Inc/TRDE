@@ -102,9 +102,12 @@ export function UserMenu() {
     : user.username?.[0]?.toUpperCase() || user.emailAddresses[0]?.emailAddress[0]?.toUpperCase() || 'U';
 
   return (
-    <div className="relative" data-user-menu>
+    <div className="relative min-w-0" data-user-menu onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setShowMenu(false); } }}>
       <button
         onClick={() => setShowMenu(!showMenu)}
+        aria-label="Account menu"
+        aria-expanded={showMenu}
+        aria-controls="account-menu"
         className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
       >
         {user.imageUrl ? (
@@ -121,7 +124,7 @@ export function UserMenu() {
             {initials}
           </div>
         )}
-        <span className="text-sm font-medium theme-text hidden sm:inline">
+        <span className="max-w-[10rem] truncate text-sm font-medium theme-text hidden lg:inline">
           {displayName}
         </span>
         <svg
@@ -140,10 +143,10 @@ export function UserMenu() {
             className="fixed inset-0 z-[90]"
             onClick={() => setShowMenu(false)}
           />
-          <div className="absolute right-0 top-full mt-2 w-56 glass-surface-strong rounded-lg shadow-xl z-[100]">
+          <div id="account-menu" className="absolute right-0 top-full mt-2 w-56 max-w-[calc(100vw-1.5rem)] glass-surface-strong rounded-lg shadow-xl z-[100]">
             <div className="p-4 border-b border-black/10 dark:border-white/10">
-              <p className="text-sm font-semibold theme-text">{displayName}</p>
-              <p className="text-xs theme-text-secondary mt-1">
+              <p className="break-words text-sm font-semibold theme-text">{displayName}</p>
+              <p className="break-words text-xs theme-text-secondary mt-1">
                 {user.emailAddresses[0]?.emailAddress}
               </p>
             </div>

@@ -3,6 +3,7 @@
 import { PerformanceHubTabs } from '@/components/PerformanceHubTabs';
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAppData } from '@/hooks/useAppData';
+import { calculateStreaks, filterPerformanceTrades } from '@/lib/trades/performance';
 import { calculateAllMetrics, Outcome } from '@trde/core';
 import type { Strategy, Trade } from '@trde/core';
 import Link from 'next/link';
@@ -10,15 +11,14 @@ import { MetricCard } from '@/components/MetricCard';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area, PieChart, Pie, ComposedChart, Cell, Legend, ReferenceLine } from 'recharts';
 import { useTheme } from '@/contexts/ThemeContext';
 import { format, parseISO } from 'date-fns';
-import { createPortal } from 'react-dom';
+import { ModalDialog } from '@/components/ModalDialog';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { getMyStrategies, type Strategy as SupabaseStrategy } from '@/lib/actions/strategies.server';
 import { useUser } from '@clerk/nextjs';
 
 export default function PerformanceHub() {
   const { user } = useUser();
-  const { trades, strategies: userStrategies, saveTrades } = useAppData();
-  const versions: any[] = []; // Versions not yet supported in demo
+  const { trades, versions, collections, strategies: userStrategies, isLoading } = useAppData();
   const { theme } = useTheme();
   const [dateRange, setDateRange] = useState<'all' | '30' | '90' | '180'>('all');
   const [showEdgeStats, setShowEdgeStats] = useState(false);
@@ -49,13 +49,7 @@ export default function PerformanceHub() {
     loadSupabaseStrategies();
   }, [loadSupabaseStrategies]);
 
-  // Filter trades by date
-  const filteredTrades = trades.filter(trade => {
-    if (dateRange === 'all') return true;
-    const days = parseInt(dateRange);
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    return trade.createdAt >= cutoff;
-  });
+  const filteredTrades = filterPerformanceTrades(trades, dateRange === 'all' ? null : Number(dateRange), showEdgeStats, collections.find(c => c.name === 'EDGE')?.id);
 
   const metrics = calculateAllMetrics(filteredTrades);
   
@@ -79,29 +73,11 @@ export default function PerformanceHub() {
     if (filteredTrades.length === 0) return null;
     
     const sortedTrades = [...filteredTrades].sort((a, b) => 
-      parseISO(a.tradeDate).getTime() - parseISO(b.tradeDate).getTime()
+      a.entryTime - b.entryTime
     );
     
-    // Streak Analysis
-    let currentWinStreak = 0;
-    let currentLossStreak = 0;
-    let maxWinStreak = 0;
-    let maxLossStreak = 0;
-    let streakHistory: { trade: number; winStreak: number; lossStreak: number }[] = [];
-    
-    sortedTrades.forEach((trade, idx) => {
-      if (trade.outcome === Outcome.WIN) {
-        currentWinStreak++;
-        currentLossStreak = 0;
-        maxWinStreak = Math.max(maxWinStreak, currentWinStreak);
-      } else {
-        currentLossStreak++;
-        currentWinStreak = 0;
-        maxLossStreak = Math.max(maxLossStreak, currentLossStreak);
-      }
-      streakHistory.push({ trade: idx + 1, winStreak: currentWinStreak, lossStreak: -currentLossStreak });
-    });
-    
+    const { maxWinStreak, maxLossStreak, streakHistory, avgConsecutiveWins, avgConsecutiveLosses } = calculateStreaks(sortedTrades);
+
     // Monthly Performance
     const monthlyPerf = new Map<string, { pnl: number; r: number; wins: number; losses: number; trades: number }>();
     sortedTrades.forEach(trade => {
@@ -111,7 +87,7 @@ export default function PerformanceHub() {
       existing.r += trade.resultR;
       existing.trades++;
       if (trade.outcome === Outcome.WIN) existing.wins++;
-      else existing.losses++;
+      else if (trade.outcome === Outcome.LOSS) existing.losses++;
       monthlyPerf.set(month, existing);
     });
     
@@ -126,7 +102,7 @@ export default function PerformanceHub() {
     // Hourly Performance
     const hourlyPerf = new Map<number, { pnl: number; r: number; count: number; wins: number }>();
     sortedTrades.forEach(trade => {
-      const hour = parseISO(trade.tradeDate).getHours();
+      const hour = new Date(trade.entryTime).getHours();
       const existing = hourlyPerf.get(hour) || { pnl: 0, r: 0, count: 0, wins: 0 };
       existing.pnl += trade.resultUsd;
       existing.r += trade.resultR;
@@ -207,28 +183,6 @@ export default function PerformanceHub() {
       };
     });
     
-    // Consecutive streaks analysis
-    let consecutiveWins: number[] = [];
-    let consecutiveLosses: number[] = [];
-    let tempWin = 0, tempLoss = 0;
-    
-    sortedTrades.forEach(trade => {
-      if (trade.outcome === Outcome.WIN) {
-        tempWin++;
-        if (tempLoss > 0) { consecutiveLosses.push(tempLoss); tempLoss = 0; }
-      } else {
-        tempLoss++;
-        if (tempWin > 0) { consecutiveWins.push(tempWin); tempWin = 0; }
-      }
-    });
-    if (tempWin > 0) consecutiveWins.push(tempWin);
-    if (tempLoss > 0) consecutiveLosses.push(tempLoss);
-    
-    const avgConsecutiveWins = consecutiveWins.length > 0 
-      ? consecutiveWins.reduce((a, b) => a + b, 0) / consecutiveWins.length : 0;
-    const avgConsecutiveLosses = consecutiveLosses.length > 0 
-      ? consecutiveLosses.reduce((a, b) => a + b, 0) / consecutiveLosses.length : 0;
-
     // Week of Month Performance
     const weekOfMonthPerf = new Map<string, { pnl: number; r: number; count: number; wins: number }>();
     sortedTrades.forEach(trade => {
@@ -631,6 +585,7 @@ export default function PerformanceHub() {
         <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
           <span className="theme-text-secondary text-body-sm font-medium">Show EDGE Stats:</span>
           <button
+            role="switch" aria-label="Show EDGE Stats" aria-checked={showEdgeStats}
             onClick={() => setShowEdgeStats(!showEdgeStats)}
             className="relative inline-flex items-center transition-all focus:outline-none focus:ring-2 active:scale-95"
             style={{
@@ -656,7 +611,7 @@ export default function PerformanceHub() {
       </div>
 
       {/* Metric Cards */}
-      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))' }}>
         <MetricCard
           label="Total P&L"
           value={`$${metrics.totalPnLUsd.toLocaleString('en-US', { maximumFractionDigits: 0 })}`}
@@ -724,9 +679,9 @@ export default function PerformanceHub() {
       </div>
 
       {/* Charts Grid */}
-      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))' }}>
+      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))' }}>
         {/* R-Multiple Distribution */}
-        <div className="card-premium hover-lift">
+        <div className="card-premium min-w-0 hover-lift">
           <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
             R-Multiple Distribution
           </h2>
@@ -760,7 +715,7 @@ export default function PerformanceHub() {
 
         {/* Equity Curve */}
         {advancedStats && advancedStats.equityCurveData.length > 0 && (
-          <div className="card-premium hover-lift">
+          <div className="card-premium min-w-0 hover-lift">
             <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
               Equity Curve
             </h2>
@@ -798,7 +753,7 @@ export default function PerformanceHub() {
 
         {/* Day of Week Performance */}
         {advancedStats && advancedStats.dayOfWeekData.length > 0 && (
-          <div className="card-premium hover-lift">
+          <div className="card-premium min-w-0 hover-lift">
             <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
               Day of Week Performance
             </h2>
@@ -864,9 +819,9 @@ export default function PerformanceHub() {
           </div>
 
           {/* More Charts Grid */}
-          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', marginTop: 'var(--space-xl)' }}>
+          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))', marginTop: 'var(--space-xl)' }}>
             {/* Monthly Performance Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Monthly Performance</h2>
               {advancedStats.monthlyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -918,7 +873,7 @@ export default function PerformanceHub() {
             </div>
 
             {/* Hourly Performance Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Performance by Hour</h2>
               {advancedStats.hourlyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -950,7 +905,7 @@ export default function PerformanceHub() {
             </div>
 
             {/* Drawdown Analysis Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Drawdown Analysis</h2>
               {advancedStats.drawdownData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -990,7 +945,7 @@ export default function PerformanceHub() {
             </div>
 
             {/* Win/Loss Streak History */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Streak History</h2>
               {advancedStats.streakHistory.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1021,7 +976,7 @@ export default function PerformanceHub() {
             </div>
 
             {/* Cumulative Win Rate */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Cumulative Win Rate</h2>
               {advancedStats.winRateOverTime.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1063,7 +1018,7 @@ export default function PerformanceHub() {
             </div>
 
             {/* Win/Loss Distribution Pie Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Distribution</h2>
               <div className="flex items-center justify-center">
                 <ResponsiveContainer width="100%" height={300}>
@@ -1152,10 +1107,10 @@ export default function PerformanceHub() {
           </div>
 
           {/* Time-Based Analysis */}
-          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', marginTop: 'var(--space-2xl)' }}>
+          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))', marginTop: 'var(--space-2xl)' }}>
             {/* Week of Month Performance */}
             {advancedStats.weekOfMonthData.length > 0 && (
-              <div className="card-premium hover-lift">
+              <div className="card-premium min-w-0 hover-lift">
                 <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Week of Month Performance</h2>
                 <ResponsiveContainer width="100%" height={300}>
                   <ComposedChart data={advancedStats.weekOfMonthData}>
@@ -1185,7 +1140,7 @@ export default function PerformanceHub() {
 
             {/* Quarter Performance */}
             {advancedStats.quarterData.length > 0 && (
-              <div className="card-premium hover-lift">
+              <div className="card-premium min-w-0 hover-lift">
                 <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Quarterly Performance</h2>
                 <ResponsiveContainer width="100%" height={300}>
                   <ComposedChart data={advancedStats.quarterData}>
@@ -1215,7 +1170,7 @@ export default function PerformanceHub() {
 
             {/* Rolling 7-Day Performance */}
             {advancedStats.rolling7DayData.length > 0 && (
-              <div className="card-premium hover-lift">
+              <div className="card-premium min-w-0 hover-lift">
                 <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Rolling 7-Trade Performance</h2>
                 <ResponsiveContainer width="100%" height={300}>
                   <AreaChart data={advancedStats.rolling7DayData}>
@@ -1243,10 +1198,10 @@ export default function PerformanceHub() {
           {/* Setup & Session Analysis */}
           <div style={{ marginTop: 'var(--space-2xl)' }}>
             <h2 className="theme-text text-h2" style={{ marginBottom: 'var(--space-xl)' }}>Setup & Session Analysis</h2>
-            <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))' }}>
+            <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))' }}>
               {/* Setup Tag Performance */}
               {advancedStats.setupTagData.length > 0 && (
-                <div className="card-premium hover-lift">
+                <div className="card-premium min-w-0 hover-lift">
                   <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Setup Tag Performance</h2>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -1277,7 +1232,7 @@ export default function PerformanceHub() {
 
               {/* Session Performance */}
               {advancedStats.sessionData.length > 0 && (
-                <div className="card-premium hover-lift">
+                <div className="card-premium min-w-0 hover-lift">
                   <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Session Performance</h2>
                   <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={advancedStats.sessionData} layout="vertical">
@@ -1300,7 +1255,7 @@ export default function PerformanceHub() {
 
               {/* Market Hours Performance */}
               {advancedStats.marketHoursData.length > 0 && (
-                <div className="card-premium hover-lift">
+                <div className="card-premium min-w-0 hover-lift">
                   <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Market Hours Performance</h2>
                   <ResponsiveContainer width="100%" height={250}>
                     <BarChart data={advancedStats.marketHoursData} layout="vertical">
@@ -1323,7 +1278,7 @@ export default function PerformanceHub() {
 
               {/* Asset Class Performance */}
               {advancedStats.assetClassData.length > 0 && (
-                <div className="card-premium hover-lift">
+                <div className="card-premium min-w-0 hover-lift">
                   <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Asset Class Performance</h2>
                   <div className="space-y-4">
                     {advancedStats.assetClassData.map((item, idx) => (
@@ -1498,7 +1453,7 @@ export default function PerformanceHub() {
   // Strategies Tab Content
   const strategiesContent = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2xl)' }}>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="theme-text-secondary text-body">
           Manage and track your trading strategies
         </p>
@@ -1519,7 +1474,7 @@ export default function PerformanceHub() {
       {allStrategies.length === 0 ? (
         <div className="text-center rounded-2xl" style={{
           padding: 'var(--space-4xl)',
-          background: 'rgba(255,255,255,0.06)',
+          background: 'var(--theme-bg-secondary)',
           backdropFilter: 'blur(16px) saturate(160%)',
           WebkitBackdropFilter: 'blur(16px) saturate(160%)',
           border: '1px solid rgba(255,255,255,0.10)',
@@ -1544,21 +1499,22 @@ export default function PerformanceHub() {
           </Link>
         </div>
       ) : (
-        <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))' }}>
+        <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 350px), 1fr))' }}>
           {allStrategies.map((entry) => {
             const { strategy, type, trades: strategyTrades, metrics: strategyMetrics } = entry;
 
             return (
-              <div
+              <button
+                type="button"
                 key={`${type}-${strategy.id}`}
                 onClick={() => {
                   setSelectedStrategyId(strategy.id);
                   setSelectedStrategyType(type);
                 }}
-                className="cursor-pointer rounded-2xl transition-all duration-300 hover:scale-[1.02]"
+                className="text-left cursor-pointer rounded-2xl transition-all duration-300 hover:scale-[1.02]"
                 style={{
                   padding: 'var(--space-xl)',
-                  background: 'rgba(255,255,255,0.06)',
+                  background: 'var(--theme-bg-secondary)',
                   backdropFilter: 'blur(16px) saturate(160%)',
                   WebkitBackdropFilter: 'blur(16px) saturate(160%)',
                   border: '1px solid rgba(255,255,255,0.10)',
@@ -1615,23 +1571,20 @@ export default function PerformanceHub() {
                     </div>
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       )}
 
       {/* Strategy Detail Modal */}
-      {mounted && selectedStrategy && selectedStrategyMetrics && createPortal(
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[200] p-4"
-          onClick={() => { setSelectedStrategyId(null); setSelectedStrategyType(null); }}
-        >
+      {mounted && selectedStrategy && selectedStrategyMetrics && (
+        <ModalDialog isOpen onClose={() => { setSelectedStrategyId(null); setSelectedStrategyType(null); }} labelledBy="strategy-detail-title" className="items-center justify-center">
           <div
             className="rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: 'rgba(255,255,255,0.06)',
+              background: 'var(--theme-bg-secondary)',
               backdropFilter: 'blur(40px) saturate(180%)',
               WebkitBackdropFilter: 'blur(40px) saturate(180%)',
               border: '1px solid rgba(255,255,255,0.12)',
@@ -1641,14 +1594,14 @@ export default function PerformanceHub() {
             {/* Modal Header */}
             <div className="sticky top-0 p-6 flex items-center justify-between z-10" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
               <div>
-                <h2 className="text-2xl font-bold theme-text">{selectedStrategy.name}</h2>
+                <h2 id="strategy-detail-title" className="text-2xl font-bold theme-text">{selectedStrategy.name}</h2>
                 {selectedStrategy.description && (
                   <p className="theme-text-secondary text-sm mt-1">{selectedStrategy.description}</p>
                 )}
               </div>
               <button
                 onClick={() => { setSelectedStrategyId(null); setSelectedStrategyType(null); }}
-                className="p-2 rounded-xl hover:opacity-80 transition-all"
+                aria-label="Close strategy details" className="p-2 rounded-xl hover:opacity-80 transition-all"
                 style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.06)' }}
               >
                 <XMarkIcon className="h-6 w-6 theme-text" />
@@ -1665,7 +1618,7 @@ export default function PerformanceHub() {
                   { label: 'Expectancy', value: `${selectedStrategyMetrics.expectancy >= 0 ? '+' : ''}${selectedStrategyMetrics.expectancy.toFixed(2)}R`, sub: 'Avg per trade', color: selectedStrategyMetrics.expectancy >= 0 ? 'text-positive' : 'text-negative' },
                   { label: 'Profit Factor', value: selectedStrategyMetrics.profitFactor === Infinity ? '∞' : selectedStrategyMetrics.profitFactor.toFixed(2), sub: 'Gross P / Gross L', color: selectedStrategyMetrics.profitFactor >= 1 ? 'text-positive' : 'text-negative' },
                 ].map((m) => (
-                  <div key={m.label} className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}>
+                  <div key={m.label} className="p-4 rounded-xl" style={{ background: 'var(--theme-bg-secondary)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}>
                     <div className="text-xs theme-text-secondary font-semibold uppercase tracking-wide mb-1">{m.label}</div>
                     <div className={`text-2xl font-bold ${m.color}`}>{m.value}</div>
                     <div className="text-xs theme-text-tertiary mt-1">{m.sub}</div>
@@ -1680,7 +1633,7 @@ export default function PerformanceHub() {
                   { label: 'Avg Loss', value: `${selectedStrategyMetrics.avgLossR.toFixed(2)}R`, color: 'text-negative' },
                   { label: 'Max Drawdown', value: `$${selectedStrategyMetrics.maxDrawdownUsd.toFixed(2)}`, color: 'text-negative' },
                 ].map((m) => (
-                  <div key={m.label} className="p-4 rounded-xl" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}>
+                  <div key={m.label} className="p-4 rounded-xl" style={{ background: 'var(--theme-bg-secondary)', border: '1px solid rgba(255,255,255,0.08)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}>
                     <div className="text-xs theme-text-secondary font-semibold uppercase tracking-wide mb-1">{m.label}</div>
                     <div className={`text-xl font-bold ${m.color}`}>{m.value}</div>
                   </div>
@@ -1735,7 +1688,7 @@ export default function PerformanceHub() {
                       <tbody>
                         {selectedStrategyTrades.slice(0, 10).map((trade) => (
                           <tr key={trade.id} className="border-b theme-border hover:theme-bg-tertiary transition-colors">
-                            <td className="py-2 px-3 theme-text">{new Date(trade.tradeDate).toLocaleDateString()}</td>
+                            <td className="py-2 px-3 theme-text">{parseISO(trade.tradeDate).toLocaleDateString()}</td>
                             <td className="py-2 px-3">
                               <span className={`px-2 py-1 rounded text-xs font-semibold ${
                                 trade.outcome === Outcome.WIN 
@@ -1788,11 +1741,11 @@ export default function PerformanceHub() {
               </div>
             </div>
           </div>
-        </div>,
-        document.body
+        </ModalDialog>
       )}
     </div>
   );
 
+  if (isLoading) return <p role="status" className="theme-text-secondary py-12">Loading performance…</p>;
   return <PerformanceHubTabs analyticsContent={analyticsContent} strategiesContent={strategiesContent} />;
 }

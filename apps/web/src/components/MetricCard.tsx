@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useId } from 'react';
+import { ModalDialog } from './ModalDialog';
 import { METRIC_EXPLAINERS } from '@trde/core';
 import type { MetricExplainer } from '@trde/core';
 import Link from 'next/link';
@@ -29,6 +29,7 @@ export function MetricCard({
   metricId,
   href,
 }: MetricCardProps) {
+  const modalTitleId = useId();
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [mounted, setMounted] = useState(false);
   const explainer = metricId ? (METRIC_EXPLAINERS[metricId] as MetricExplainer | undefined) : undefined;
@@ -50,21 +51,17 @@ export function MetricCard({
   }, []);
 
   // Modal rendered via portal to avoid overflow clipping issues
-  const infoModal = showInfoModal && explainer && mounted ? createPortal(
-    <div 
-      className="fixed inset-0 flex items-center justify-center z-[9999]"
-      onClick={() => setShowInfoModal(false)}
-      style={{ background: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', padding: 'var(--space-lg)' }}
-    >
+  const infoModal = showInfoModal && explainer && mounted ? (
+    <ModalDialog isOpen onClose={() => setShowInfoModal(false)} labelledBy={modalTitleId} className="items-center justify-center">
       <div 
         className="glass-surface-strong rounded-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
         style={{ padding: 'var(--space-2xl)', boxShadow: 'var(--glass-shadow-hover, 0 25px 50px -12px rgba(0, 0, 0, 0.5))', border: '1px solid var(--glass-border, var(--theme-border))' }}
       >
         <div className="flex items-center justify-between border-b" style={{ marginBottom: 'var(--space-xl)', paddingBottom: 'var(--space-lg)', borderColor: 'var(--theme-border)' }}>
-          <h3 className="theme-text" style={{ fontSize: 'var(--font-size-h3)', fontWeight: 'var(--font-weight-bold)' }}>{explainer.title}</h3>
+          <h3 id={modalTitleId} className="theme-text" style={{ fontSize: 'var(--font-size-h3)', fontWeight: 'var(--font-weight-bold)' }}>{explainer.title}</h3>
           <button
-            onClick={() => setShowInfoModal(false)}
+            aria-label="Close metric details" onClick={() => setShowInfoModal(false)}
             className="theme-text-secondary hover:theme-text active:scale-95 transition-all focus:outline-none rounded-full"
             style={{ padding: 'var(--space-sm)', transitionDuration: 'var(--transition-fast)' }}
           >
@@ -83,8 +80,7 @@ export function MetricCard({
           </Link>
         </div>
       </div>
-    </div>,
-    document.body
+    </ModalDialog>
   ) : null;
 
   const content = (
@@ -110,7 +106,7 @@ export function MetricCard({
                 }}
                 className="transition-all duration-200 hover:scale-110 active:scale-95 focus:outline-none rounded-full"
                 style={{ color: 'var(--theme-primary)' }}
-                title="Info"
+                aria-label={`About ${label}`} title="Info"
               >
                 <InformationCircleIcon className="h-4 w-4" />
               </button>

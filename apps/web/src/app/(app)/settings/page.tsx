@@ -3,9 +3,9 @@
 import { exportTradesToCsv, exportWeeklyReportText } from '@trde/mock-db';
 import { useAppData } from '@/hooks/useAppData';
 import { type DashboardMetricId } from '@/contexts/StorageContext';
-import { resetData } from '@/lib/init';
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { ModalDialog } from '@/components/ModalDialog';
 import { format } from 'date-fns';
 import { 
   XMarkIcon, 
@@ -39,6 +39,7 @@ import { AdminLoginSection } from '@/components/AdminLoginSection';
 import { SubscriptionSection } from './subscription-section';
 import { useUser, useClerk } from '@clerk/nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { getEdgeAccountScope, isCurrentEdgeAccount } from '@/lib/edge/store/accountScope';
 import { getSyncState, getTrades } from '@/lib/edge/store/edgeStore';
 
 type SettingsTab = 'account' | 'billing' | 'appearance' | 'dashboard' | 'risk' | 'data' | 'api' | 'notifications' | 'admin';
@@ -55,17 +56,17 @@ function WeeklyReportModal({ report, onClose }: { report: string; onClose: () =>
   };
 
   return createPortal(
-    <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-      onClick={onClose}
+    <ModalDialog isOpen labelledBy="settings-weekly-report-title"
+      className="items-center justify-center overflow-y-auto"
+      onClose={onClose}
     >
       <div
-        className="theme-bg-secondary p-6 rounded-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto border theme-border shadow-2xl"
+        className="theme-bg-secondary p-4 sm:p-6 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto border theme-border shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-5 border-b theme-border pb-4">
-          <h2 className="text-xl font-bold theme-text">Weekly Report Preview (Mock)</h2>
-          <button onClick={onClose} className="theme-text-secondary hover:theme-text transition-colors">
+          <h2 id="settings-weekly-report-title" className="text-xl font-bold theme-text">Weekly Report Preview</h2>
+          <button aria-label="Close weekly report" onClick={onClose} className="theme-text-secondary hover:theme-text transition-colors">
             <XMarkIcon className="h-6 w-6" />
           </button>
         </div>
@@ -85,7 +86,7 @@ function WeeklyReportModal({ report, onClose }: { report: string; onClose: () =>
           </button>
         </div>
       </div>
-    </div>,
+    </ModalDialog>,
     document.body
   );
 }
@@ -135,7 +136,7 @@ function AppearanceSceneSelector() {
     <div className="space-y-8">
       {/* Scene Selector */}
       <div
-        className="rounded-2xl p-8"
+        className="rounded-2xl p-4 sm:p-8"
         style={{
           background: 'rgba(255, 255, 255, 0.08)',
           backdropFilter: 'blur(20px) saturate(180%)',
@@ -328,20 +329,20 @@ export default function SettingsPage() {
     syncFromCloud,
     isSyncing,
     isLoading,
+    collections,
+    clearAllData,
+    migrateLocalToCloud,
+    lastSyncTime,
+    syncError,
+    needsMigration,
     isDemo
   } = useAppData();
-  // Collections not yet in useAppData
-  const collections: any[] = [];
-  const migrateLocalToCloud = async () => {};
-  const clearAllData = async () => {};
-  const lastSyncTime = null;
-  const needsMigration = false;
   const [activeTab, setActiveTab] = useState<SettingsTab>('account');
   
   // Handle tab from URL param
   useEffect(() => {
     const tabParam = searchParams.get('tab');
-    if (tabParam && ['account', 'billing', 'appearance', 'dashboard', 'risk', 'data', 'api', 'admin'].includes(tabParam)) {
+    if (tabParam && ['account', 'billing', 'appearance', 'dashboard', 'risk', 'data', 'api', 'notifications', 'admin'].includes(tabParam)) {
       setActiveTab(tabParam as SettingsTab);
     }
   }, [searchParams]);
@@ -353,6 +354,9 @@ export default function SettingsPage() {
   const [reportContent, setReportContent] = useState('');
   const [rules, setRules] = useState<RiskRules | null>(null);
   const [editing, setEditing] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [dataStatus, setDataStatus] = useState<string | null>(null);
+  const [metricsSaving, setMetricsSaving] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetricId[]>(['totalPnLUsd', 'winRate', 'profitFactor', 'mistakeTaxUsd']);
   
@@ -523,13 +527,13 @@ export default function SettingsPage() {
   };
 
   const handleExportWeeklyReport = () => {
-    const lastReview = weeklyReviews[weeklyReviews.length - 1];
+    const lastReview = [...weeklyReviews].sort((a, b) => b.weekStart.localeCompare(a.weekStart))[0];
     const weekStart = lastReview
       ? lastReview.weekStart
-      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      : format(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
     const weekEnd = lastReview
       ? lastReview.weekEnd
-      : new Date().toISOString().split('T')[0];
+      : format(new Date(), 'yyyy-MM-dd');
 
     const report = exportWeeklyReportText(weekStart, weekEnd, trades, lastReview);
     setReportContent(report);
@@ -537,14 +541,17 @@ export default function SettingsPage() {
   };
 
   const handleReset = () => {
-    resetData();
-    setShowResetConfirm(false);
+    if (!user) return;
+    const prefix = `trde_${user.id}_`;
+    Object.keys(localStorage).filter((key) => key.startsWith(prefix)).forEach((key) => localStorage.removeItem(key));
+    window.location.reload();
   };
 
   const handleClearAllData = async () => {
-    if (clearAllConfirmText !== 'DELETE ALL') return;
+    if (clearAllConfirmText !== 'DELETE JOURNAL DATA') return;
     
     setIsClearing(true);
+    setSettingsError(null);
     try {
       await clearAllData();
       setClearAllConfirmText('');
@@ -553,7 +560,7 @@ export default function SettingsPage() {
       router.push('/app');
     } catch (error) {
       console.error('Error clearing all data:', error);
-      alert('Failed to clear data. Please try again.');
+      setSettingsError(error instanceof Error ? error.message : 'Could not finish deleting journal data. Refresh and retry.');
     } finally {
       setIsClearing(false);
     }
@@ -647,8 +654,8 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveRules = (newRules: RiskRules) => {
-    saveRiskRules(newRules);
+  const handleSaveRules = async (newRules: RiskRules) => {
+    await saveRiskRules(newRules);
     setRules(newRules);
     setEditing(false);
   };
@@ -841,6 +848,8 @@ export default function SettingsPage() {
   };
 
   const handleProjectXSync = async () => {
+    const edgeScope = getEdgeAccountScope();
+    if (!isCurrentEdgeAccount(edgeScope)) return;
     if (!projectXConnectionInfo?.accountId) {
       setProjectXAlertModal({ show: true, message: 'Please set Account ID before syncing' });
       return;
@@ -876,14 +885,15 @@ export default function SettingsPage() {
         const executions = data.trades.map(normalizeExecution);
         const roundTrips = groupExecutionsIntoRoundTrips(executions);
 
-        saveExecutions(executions);
-        saveEdgeTrades(roundTrips);
+        if (!isCurrentEdgeAccount(edgeScope)) return;
+        saveExecutions(executions, edgeScope);
+        saveEdgeTrades(roundTrips, edgeScope);
         saveSyncState({
           lastSyncTime: new Date().toISOString(),
           totalExecutions: executions.length,
           totalTrades: roundTrips.length,
           dateRange: { start: startTimestamp, end: endTimestamp },
-        });
+        }, edgeScope);
 
         setProjectXSyncState(getSyncState());
         
@@ -894,7 +904,11 @@ export default function SettingsPage() {
           onConfirm: async () => {
             setProjectXConfirmModal(null);
             const { importAllEdgeTradesToJournal } = await import('@/lib/edge/utils/tradeMapping');
-            const result = await importAllEdgeTradesToJournal(saveTrades);
+            const result = await importAllEdgeTradesToJournal(saveTrades, edgeScope).catch((error) => {
+              if (isCurrentEdgeAccount(edgeScope)) setProjectXAlertModal({ show: true, message: error instanceof Error ? error.message : 'Could not import trades.' });
+              return null;
+            });
+            if (!result) return;
             
             if (result.imported > 0) {
               setProjectXAlertModal({
@@ -924,7 +938,7 @@ export default function SettingsPage() {
     return (
       <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <SkeletonLoader width="300px" height="3rem" />
-        <div className="theme-bg-tertiary/50 p-8 rounded-2xl border theme-border">
+        <div className="theme-bg-tertiary/50 p-4 sm:p-8 rounded-2xl border theme-border">
           <SkeletonLoader width="150px" height="1.5rem" className="mb-4" />
           <SkeletonLoader width="100%" height="1rem" className="mb-2" />
         </div>
@@ -972,7 +986,7 @@ export default function SettingsPage() {
         {/* Modern Tab Navigation - Pill Style */}
         <div className="mb-8">
           <div 
-            className="inline-flex p-1.5 rounded-2xl w-full sm:w-auto overflow-x-auto"
+            className="inline-flex max-w-full p-1.5 rounded-2xl w-full sm:w-auto overflow-x-auto"
             style={{
               background: 'rgba(255,255,255,0.06)',
               backdropFilter: 'blur(20px) saturate(180%)',
@@ -987,7 +1001,11 @@ export default function SettingsPage() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    router.replace(`/settings?tab=${tab.id}`, { scroll: false });
+                  }}
+                  aria-current={isActive ? 'page' : undefined}
                   className={`
                     flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200 whitespace-nowrap
                     ${isActive
@@ -1011,6 +1029,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {settingsError && <p role="alert" className="mb-4 rounded-xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-300">{settingsError}</p>}
         {/* Tab Content */}
         <div className="animate-fade-in">
           {/* Account Tab */}
@@ -1018,7 +1037,7 @@ export default function SettingsPage() {
             <div className="space-y-6">
               {/* Profile Section */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1168,7 +1187,7 @@ export default function SettingsPage() {
 
               {/* Security Section */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1290,7 +1309,7 @@ export default function SettingsPage() {
             <div className="space-y-6">
               {/* Subscription Status */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1314,7 +1333,7 @@ export default function SettingsPage() {
 
               {/* Billing Info */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1368,7 +1387,7 @@ export default function SettingsPage() {
           {/* Dashboard Tab */}
           {activeTab === 'dashboard' && (
             <div 
-              className="rounded-2xl p-8"
+              className="rounded-2xl p-4 sm:p-8"
               style={{
                 backgroundColor: 'var(--theme-bg-secondary)',
                 border: '1px solid var(--theme-border)',
@@ -1412,21 +1431,22 @@ export default function SettingsPage() {
                         </label>
                         <select
                           value={dashboardMetrics[index]}
-                          onChange={(e) => {
+                          disabled={metricsSaving || isDemo}
+                          aria-label={`Metric Slot ${index + 1}`}
+                          onChange={async (e) => {
                             const newValue = e.target.value as DashboardMetricId;
-                            if (dashboardMetrics.includes(newValue) && dashboardMetrics[index] !== newValue) {
-                              const otherIndex = dashboardMetrics.findIndex((m, i) => m === newValue && i !== index);
-                              const newMetrics = [...dashboardMetrics];
-                              newMetrics[otherIndex] = dashboardMetrics[index];
-                              newMetrics[index] = newValue;
+                            const newMetrics = [...dashboardMetrics];
+                            const otherIndex = newMetrics.findIndex((metric, slot) => metric === newValue && slot !== index);
+                            if (otherIndex !== -1) newMetrics[otherIndex] = newMetrics[index];
+                            newMetrics[index] = newValue;
+                            setMetricsSaving(true);
+                            setSettingsError(null);
+                            try {
+                              await saveDashboardMetrics(newMetrics);
                               setDashboardMetrics(newMetrics);
-                              saveDashboardMetrics(newMetrics);
-                            } else {
-                              const newMetrics = [...dashboardMetrics];
-                              newMetrics[index] = newValue;
-                              setDashboardMetrics(newMetrics);
-                              saveDashboardMetrics(newMetrics);
-                            }
+                            } catch (error) {
+                              setSettingsError(error instanceof Error ? error.message : 'Could not save dashboard metrics.');
+                            } finally { setMetricsSaving(false); }
                           }}
                           className="w-full px-4 py-3 rounded-xl text-sm theme-text font-medium focus:outline-none focus:ring-2 transition-all"
                           style={{
@@ -1473,7 +1493,7 @@ export default function SettingsPage() {
           {/* Risk Rules Tab */}
           {activeTab === 'risk' && (
             <div 
-              className="rounded-2xl p-8"
+              className="rounded-2xl p-4 sm:p-8"
               style={{
                 backgroundColor: 'var(--theme-bg-secondary)',
                 border: '1px solid var(--theme-border)',
@@ -1578,7 +1598,7 @@ export default function SettingsPage() {
             <div className="space-y-6">
               {/* Subscription Section */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1589,7 +1609,7 @@ export default function SettingsPage() {
 
               {/* Export Data Section */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1648,7 +1668,7 @@ export default function SettingsPage() {
                       </div>
                       <div className="text-left flex-1">
                         <div className="font-semibold theme-text mb-1">Weekly Report</div>
-                        <div className="text-xs theme-text-secondary">Generate report (Mock)</div>
+                        <div className="text-xs theme-text-secondary">Generate a report from your saved trades</div>
                       </div>
                     </div>
                   </button>
@@ -1657,7 +1677,7 @@ export default function SettingsPage() {
 
               {/* Cloud Sync Section */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1676,6 +1696,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
+                {(dataStatus || syncError) && <p role={syncError ? 'alert' : 'status'} className="mb-4 text-sm theme-text-secondary">{syncError || dataStatus}</p>}
                 {/* Data Overview */}
                 <div 
                   className="grid grid-cols-3 gap-4 p-6 rounded-xl mb-6"
@@ -1693,17 +1714,17 @@ export default function SettingsPage() {
 
                 {/* Sync Actions */}
                 <div className="space-y-3">
-                  <button
+                  {needsMigration && <button
                     onClick={async () => {
                       try {
                         await migrateLocalToCloud();
-                        alert('Migration complete! Your data is now in the cloud.');
+                        setDataStatus('Local journal data imported.');
                       } catch (error) {
                         console.error('Error migrating:', error);
-                        alert('Migration failed. Check console for details.');
+                        setSettingsError(error instanceof Error ? error.message : 'Import failed. Your local data is retained.');
                       }
                     }}
-                    disabled={isSyncing || isLoading}
+                    disabled={isSyncing || isLoading || isDemo}
                     className="w-full p-4 rounded-xl transition-all hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed theme-text"
                     style={{
                       background: 'rgba(255,255,255,0.10)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.2)',
@@ -1712,19 +1733,19 @@ export default function SettingsPage() {
                   >
                     <div className="flex items-center justify-center gap-2">
                       <ArrowPathIcon className={`h-5 w-5 ${isSyncing ? 'animate-spin' : ''}`} />
-                      {isSyncing ? 'Migrating...' : 'Migrate All Local Data to Cloud'}
+                      {isSyncing ? 'Migrating...' : 'Import Local Journal Data'}
                     </div>
-                  </button>
+                  </button>}
 
                   <button
                     onClick={async () => {
                       try {
-                        if (trades.length > 0) {
-                          await saveTrades(trades);
-                        }
+                        setSettingsError(null);
+                        setDataStatus(null);
                         await syncFromCloud();
+                        setDataStatus('Journal refreshed from the cloud.');
                       } catch (error) {
-                        console.error('Error syncing:', error);
+                        setSettingsError(error instanceof Error ? error.message : 'Could not refresh the journal.');
                       }
                     }}
                     disabled={isSyncing || isLoading}
@@ -1743,12 +1764,12 @@ export default function SettingsPage() {
                       </div>
                       <div className="text-left flex-1">
                         <div className="font-semibold theme-text text-sm">
-                          {isSyncing ? 'Syncing...' : 'Sync to Cloud'}
+                          {isSyncing ? 'Refreshing...' : 'Refresh from Cloud'}
                         </div>
                         <div className="text-xs theme-text-secondary">
                           {lastSyncTime 
                             ? `Last synced: ${new Date(lastSyncTime).toLocaleString()}`
-                            : 'Never synced'}
+                            : 'Refresh to load your latest saved journal'}
                         </div>
                       </div>
                     </div>
@@ -1758,7 +1779,7 @@ export default function SettingsPage() {
 
               {/* Data Management Section */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -1789,7 +1810,7 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-semibold theme-text mb-1">Clear Local Cache</div>
-                        <div className="text-sm theme-text-secondary">Clears browser cache only. Cloud data remains safe.</div>
+                        <div className="text-sm theme-text-secondary">Clears this account’s browser cache. Saved cloud records reload; unsynced changes will be lost.</div>
                       </div>
                       {!showResetConfirm ? (
                         <button
@@ -1834,14 +1855,15 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-semibold mb-1" style={{ color: 'var(--theme-error)' }}>
-                          Delete All Data
+                          Delete Journal Data
                         </div>
                         <div className="text-sm theme-text-secondary">
-                          Permanently deletes ALL data including cloud. This cannot be undone.
+                          Deletes your trades, journals, private strategies, reviews, tasks and risk/dashboard settings from the cloud.
                         </div>
                       </div>
                       <button
-                        onClick={() => setShowClearAllModal(true)}
+                        onClick={() => { setSettingsError(null); setShowClearAllModal(true); }}
+                        disabled={isDemo || isLoading || isSyncing}
                         className="px-5 py-2.5 rounded-xl font-semibold text-white transition-all hover:opacity-90"
                         style={{ backgroundColor: 'var(--theme-error)' }}
                       >
@@ -1854,15 +1876,16 @@ export default function SettingsPage() {
 
               {/* Clear All Data Warning Modal */}
               {showClearAllModal && createPortal(
-                <div
-                  className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[300] p-4"
-                  onClick={() => {
+                <ModalDialog isOpen labelledBy="settings-delete-journal-title"
+                  className="items-center justify-center overflow-y-auto"
+                  onClose={() => {
+                    if (isClearing) return;
                     setShowClearAllModal(false);
                     setClearAllConfirmText('');
                   }}
                 >
                   <div
-                    className="theme-bg-secondary rounded-2xl max-w-md w-full shadow-2xl border theme-border overflow-hidden"
+                    className="theme-bg-secondary rounded-2xl max-w-md w-full max-h-[90dvh] overflow-y-auto shadow-2xl border theme-border"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {/* Warning Header */}
@@ -1877,7 +1900,7 @@ export default function SettingsPage() {
                           <ExclamationCircleIcon className="h-8 w-8 text-white" />
                         </div>
                         <div>
-                          <h2 className="text-xl font-bold text-white">Delete All Data</h2>
+                          <h2 id="settings-delete-journal-title" className="text-xl font-bold text-white">Delete Journal Data</h2>
                           <p className="text-white/80 text-sm">This action is permanent</p>
                         </div>
                       </div>
@@ -1904,7 +1927,7 @@ export default function SettingsPage() {
                           </li>
                           <li className="flex items-center gap-2">
                             <span style={{ color: 'var(--theme-error)' }}>•</span>
-                            All collections, reviews, and settings
+                            All collections, reviews, tasks, risk rules and dashboard metrics
                           </li>
                         </ul>
                       </div>
@@ -1920,23 +1943,25 @@ export default function SettingsPage() {
                           This action cannot be undone.
                         </p>
                         <p className="text-xs theme-text-secondary">
-                          Your data will be permanently removed from both local storage and cloud.
+                          Journal data is removed from this account. Your account, billing, connections and notification preferences are kept.
                         </p>
                       </div>
 
+                      {settingsError && <p role="alert" className="text-sm text-red-300">{settingsError}</p>}
                       {/* Confirmation Input */}
                       <div>
-                        <label className="block text-sm font-medium theme-text mb-2">
-                          Type <span className="font-mono font-bold" style={{ color: 'var(--theme-error)' }}>DELETE ALL</span> to confirm
+                        <label htmlFor="delete-journal-confirmation" className="block text-sm font-medium theme-text mb-2">
+                          Type <span className="font-mono font-bold" style={{ color: 'var(--theme-error)' }}>DELETE JOURNAL DATA</span> to confirm
                         </label>
                         <input
+                          id="delete-journal-confirmation"
                           type="text"
                           value={clearAllConfirmText}
                           onChange={(e) => setClearAllConfirmText(e.target.value)}
-                          placeholder="DELETE ALL"
+                          placeholder="DELETE JOURNAL DATA"
                           className="w-full px-4 py-3 rounded-xl theme-bg-tertiary theme-text border theme-border focus:outline-none focus:ring-2"
                           style={{ 
-                            borderColor: clearAllConfirmText === 'DELETE ALL' ? 'var(--theme-error)' : undefined,
+                            borderColor: clearAllConfirmText === 'DELETE JOURNAL DATA' ? 'var(--theme-error)' : undefined,
                           }}
                         />
                       </div>
@@ -1944,6 +1969,7 @@ export default function SettingsPage() {
                       {/* Actions */}
                       <div className="flex gap-3 pt-2">
                         <button
+                          disabled={isClearing}
                           onClick={() => {
                             setShowClearAllModal(false);
                             setClearAllConfirmText('');
@@ -1958,16 +1984,16 @@ export default function SettingsPage() {
                         </button>
                         <button
                           onClick={handleClearAllData}
-                          disabled={clearAllConfirmText !== 'DELETE ALL' || isClearing}
+                          disabled={clearAllConfirmText !== 'DELETE JOURNAL DATA' || isClearing}
                           className="flex-1 px-5 py-3 rounded-xl font-semibold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                           style={{ backgroundColor: 'var(--theme-error)' }}
                         >
-                          {isClearing ? 'Deleting...' : 'Delete Everything'}
+                          {isClearing ? 'Deleting...' : 'Delete Journal Data'}
                         </button>
                       </div>
                     </div>
                   </div>
-                </div>,
+                </ModalDialog>,
                 document.body
               )}
 
@@ -2407,8 +2433,13 @@ export default function SettingsPage() {
                                 {/* Import button */}
                                 <button
                                   onClick={async () => {
+                                    const edgeScope = getEdgeAccountScope();
                                     const { importAllEdgeTradesToJournal } = await import('@/lib/edge/utils/tradeMapping');
-                                    const result = await importAllEdgeTradesToJournal(saveTrades);
+                                    const result = await importAllEdgeTradesToJournal(saveTrades, edgeScope).catch((error) => {
+                                      if (isCurrentEdgeAccount(edgeScope)) setProjectXAlertModal({ show: true, message: error instanceof Error ? error.message : 'Could not import trades.' });
+                                      return null;
+                                    });
+                                    if (!result) return;
                                     
                                     if (result.imported > 0) {
                                       setProjectXAlertModal({
@@ -2589,7 +2620,7 @@ export default function SettingsPage() {
             <div className="space-y-6">
               {/* Admin Panel Access */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -2633,7 +2664,7 @@ export default function SettingsPage() {
 
               {/* Quick Admin Actions */}
               <div 
-                className="rounded-2xl p-8"
+                className="rounded-2xl p-4 sm:p-8"
                 style={{
                   backgroundColor: 'var(--theme-bg-secondary)',
                   border: '1px solid var(--theme-border)',
@@ -2666,15 +2697,15 @@ export default function SettingsPage() {
       
       {/* ProjectX Modals */}
       {projectXConfirmModal?.show && mounted && createPortal(
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4"
-          onClick={() => {
+        <ModalDialog isOpen labelledBy="settings-projectx-confirm-title"
+          className="items-center justify-center overflow-y-auto"
+          onClose={() => {
             if (projectXConfirmModal.onCancel) projectXConfirmModal.onCancel();
             else setProjectXConfirmModal(null);
           }}
         >
           <div
-            className="rounded-2xl max-w-lg w-full"
+            className="rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ 
               backgroundColor: 'var(--theme-bg-secondary)',
@@ -2684,8 +2715,8 @@ export default function SettingsPage() {
           >
             <div className="p-6 border-b" style={{ borderColor: 'var(--theme-border)' }}>
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold theme-text">{projectXConfirmModal.title}</h2>
-                <button
+                <h2 id="settings-projectx-confirm-title" className="text-xl font-bold theme-text">{projectXConfirmModal.title}</h2>
+                <button aria-label="Close confirmation"
                   onClick={() => {
                     if (projectXConfirmModal.onCancel) projectXConfirmModal.onCancel();
                     else setProjectXConfirmModal(null);
@@ -2728,17 +2759,17 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-        </div>,
+        </ModalDialog>,
         document.body
       )}
 
       {projectXAlertModal?.show && mounted && createPortal(
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4"
-          onClick={() => setProjectXAlertModal(null)}
+        <ModalDialog isOpen labelledBy="settings-projectx-alert-title"
+          className="items-center justify-center overflow-y-auto"
+          onClose={() => setProjectXAlertModal(null)}
         >
           <div
-            className="rounded-2xl max-w-lg w-full"
+            className="rounded-2xl max-w-lg w-full max-h-[90dvh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ 
               backgroundColor: 'var(--theme-bg-secondary)',
@@ -2748,8 +2779,8 @@ export default function SettingsPage() {
           >
             <div className="p-6 border-b" style={{ borderColor: 'var(--theme-border)' }}>
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold theme-text">TRDE</h2>
-                <button
+                <h2 id="settings-projectx-alert-title" className="text-xl font-bold theme-text">TRDE</h2>
+                <button aria-label="Close message"
                   onClick={() => setProjectXAlertModal(null)}
                   className="theme-text-secondary hover:theme-text p-2 rounded-full transition-all"
                 >
@@ -2770,15 +2801,15 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-        </div>,
+        </ModalDialog>,
         document.body
       )}
 
       {/* Password Change Modal */}
       {showPasswordModal && createPortal(
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={() => {
+        <ModalDialog isOpen labelledBy="settings-password-title"
+          className="items-center justify-center overflow-y-auto"
+          onClose={() => {
             setShowPasswordModal(false);
             setPasswordError(null);
             setCurrentPassword('');
@@ -2787,7 +2818,7 @@ export default function SettingsPage() {
           }}
         >
           <div
-            className="w-full max-w-md rounded-2xl p-8"
+            className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl p-4 sm:p-8"
             style={{
               backgroundColor: 'var(--theme-bg-secondary)',
               border: '1px solid var(--theme-border)',
@@ -2803,9 +2834,9 @@ export default function SettingsPage() {
                 >
                   <KeyIcon className="h-6 w-6 theme-text-secondary" />
                 </div>
-                <h2 className="text-xl font-bold theme-text">Change Password</h2>
+                <h2 id="settings-password-title" className="text-xl font-bold theme-text">Change Password</h2>
               </div>
-              <button
+              <button aria-label="Close password dialog"
                 onClick={() => {
                   setShowPasswordModal(false);
                   setPasswordError(null);
@@ -2920,7 +2951,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-        </div>,
+        </ModalDialog>,
         document.body
       )}
     </div>
@@ -3170,10 +3201,12 @@ function RiskRulesForm({
   onCancel,
 }: {
   rules: RiskRules;
-  onSave: (rules: RiskRules) => void;
+  onSave: (rules: RiskRules) => Promise<void>;
   onCancel: () => void;
 }) {
   const [formData, setFormData] = useState(rules);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (rules) {
@@ -3194,6 +3227,7 @@ function RiskRulesForm({
           <label className="block text-sm font-bold theme-text mb-2 uppercase tracking-wide">Daily Loss Limit (USD)</label>
           <input
             type="number"
+            aria-label="Daily loss limit (USD)"
             value={formData.dailyLossLimitUsd}
             onChange={(e) => setFormData({ ...formData, dailyLossLimitUsd: parseFloat(e.target.value) || 0 })}
             className="w-full px-4 py-3 rounded-xl text-sm font-medium focus:outline-none focus:ring-2"
@@ -3203,6 +3237,7 @@ function RiskRulesForm({
           <label className="block text-sm font-bold theme-text mb-2 uppercase tracking-wide">Max Trades Per Day</label>
           <input
             type="number"
+            aria-label="Max trades per day"
             value={formData.maxTradesPerDay}
             onChange={(e) => setFormData({ ...formData, maxTradesPerDay: parseInt(e.target.value) || 0 })}
             className="w-full px-4 py-3 rounded-xl text-sm font-medium focus:outline-none focus:ring-2"
@@ -3212,6 +3247,7 @@ function RiskRulesForm({
           <label className="block text-sm font-bold theme-text mb-2 uppercase tracking-wide">Max Contracts Per Trade</label>
           <input
             type="number"
+            aria-label="Max contracts per trade"
             value={formData.maxContractsPerTrade}
             onChange={(e) => setFormData({ ...formData, maxContractsPerTrade: parseInt(e.target.value) || 0 })}
             className="w-full px-4 py-3 rounded-xl text-sm font-medium focus:outline-none focus:ring-2"
@@ -3251,15 +3287,22 @@ function RiskRulesForm({
         </label>
       </div>
 
+      {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
       <div className="flex gap-3">
         <button
-          onClick={() => onSave(formData)}
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true); setError(null);
+            try { await onSave(formData); }
+            catch (failure) { setError(failure instanceof Error ? failure.message : 'Could not save risk rules.'); }
+            finally { setSaving(false); }
+          }}
           className="flex-1 px-6 py-3 rounded-xl font-bold theme-text transition-all hover:scale-105"
           style={{
             background: 'rgba(255,255,255,0.10)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', border: '1px solid rgba(255,255,255,0.15)', boxShadow: '0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.2)',
           }}
         >
-          Save Changes
+          {saving ? 'Saving...' : 'Save Changes'}
         </button>
         <button
           onClick={onCancel}

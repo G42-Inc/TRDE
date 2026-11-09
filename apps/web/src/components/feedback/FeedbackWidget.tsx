@@ -61,8 +61,8 @@ export function FeedbackWidget({ position = 'bottom-right' }: FeedbackWidgetProp
   const { submitFeedback, isSubmitting, isSuccess, error, reset } = useFeedback();
 
   const positionClasses = {
-    'bottom-right': 'right-6 bottom-6',
-    'bottom-left': 'left-6 bottom-6',
+    'bottom-right': 'right-3 bottom-24 sm:right-6 md:bottom-6',
+    'bottom-left': 'left-3 bottom-24 sm:left-6 md:bottom-6',
   };
 
   const handleSubmit = async () => {
@@ -103,7 +103,7 @@ export function FeedbackWidget({ position = 'bottom-right' }: FeedbackWidgetProp
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="w-80 sm:w-96 rounded-2xl overflow-hidden border border-white/10 shadow-2xl"
+            className="w-80 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-8rem)] sm:w-96 rounded-2xl overflow-auto border border-white/10 shadow-2xl"
             style={{ 
               background: 'linear-gradient(135deg, rgba(20, 20, 20, 0.98) 0%, rgba(10, 10, 10, 0.98) 100%)',
               backdropFilter: 'blur(20px)',

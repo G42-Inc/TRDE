@@ -1,3 +1,4 @@
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
 import { saveOwnedRecords, RecordConflictError, InvalidRecordError } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
@@ -41,9 +42,9 @@ export async function GET(request: NextRequest) {
       description: row.description || undefined,
       category: row.category,
       completed: row.completed || false,
-      completedAt: row.completed_at || undefined,
+      completedAt: row.completed_at ?? undefined,
       createdAt: row.created_at,
-      dueDate: row.due_date || undefined,
+      dueDate: row.due_date ?? undefined,
     }));
 
     return NextResponse.json({ todos });
@@ -72,8 +73,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const demo = await checkDemoStatus(userId);
+    if (demo.error) return NextResponse.json({ error: 'Could not verify journal access. Please retry.' }, { status: 503 });
+    if (demo.isDemo) return createDemoBlockedResponse('saving journal data');
+
     const body = await request.json();
-    const { todos } = body;
+    const { todos, deletedIds = [] } = body;
 
     if (!Array.isArray(todos)) {
       return NextResponse.json(
@@ -84,22 +89,8 @@ export async function POST(request: NextRequest) {
 
     const supabase = getSupabaseServiceClient();
     
-    // If todos array is empty, delete all for this user (clear operation)
-    if (todos.length === 0) {
-      const { error: deleteError } = await supabase
-        .from('todos')
-        .delete()
-        .eq('user_id', userId);
-
-      if (deleteError) {
-        console.error('Error deleting todos:', deleteError);
-        return NextResponse.json(
-          { error: 'Failed to delete todos' },
-          { status: 500 }
-        );
-      }
-      
-      return NextResponse.json({ success: true, count: 0, deleted: true });
+    if (!Array.isArray(deletedIds) || deletedIds.length > 5000 || deletedIds.some((id: unknown) => typeof id !== 'string' || !id || id.length > 300) || todos.some((todo: Todo) => deletedIds.includes(todo.id))) {
+      return NextResponse.json({ error: 'Invalid deleted task identifiers' }, { status: 400 });
     }
 
     const dbTodos = todos.map((todo: Todo) => ({
@@ -109,14 +100,18 @@ export async function POST(request: NextRequest) {
       description: todo.description || null,
       category: todo.category,
       completed: todo.completed || false,
-      completed_at: todo.completedAt || null,
+      completed_at: todo.completedAt ?? null,
       created_at: todo.createdAt,
-      due_date: todo.dueDate || null,
+      due_date: todo.dueDate ?? null,
       updated_at: Date.now(),
       metadata: {},
     }));
 
     await saveOwnedRecords(supabase, 'todos', userId, dbTodos);
+    for (let offset = 0; offset < deletedIds.length; offset += 100) {
+      const { error } = await supabase.from('todos').delete().eq('user_id', userId).in('id', deletedIds.slice(offset, offset + 100));
+      if (error) throw error;
+    }
 
     return NextResponse.json({ success: true, count: todos.length });
   } catch (error: any) {

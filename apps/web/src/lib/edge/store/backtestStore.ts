@@ -1,3 +1,4 @@
+import { readEdgeJson, writeEdgeStorage, getEdgeAccountScope, type EdgeAccountScope } from './accountScope';
 // Hypothetical trades store for manual backtesting
 
 import type { HypotheticalTrade } from '../types';
@@ -7,18 +8,17 @@ const STORAGE_KEY = 'edge:hypotheticalTrades';
 /**
  * Save hypothetical trades
  */
-export function saveHypotheticalTrades(trades: HypotheticalTrade[]): void {
+export function saveHypotheticalTrades(trades: HypotheticalTrade[], scope: EdgeAccountScope | null = getEdgeAccountScope()): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(trades));
+  writeEdgeStorage(STORAGE_KEY, JSON.stringify(trades), scope);
 }
 
 /**
  * Get hypothetical trades
  */
-export function getHypotheticalTrades(): HypotheticalTrade[] {
+export function getHypotheticalTrades(scope: EdgeAccountScope | null = getEdgeAccountScope()): HypotheticalTrade[] {
   if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(STORAGE_KEY);
-  return data ? JSON.parse(data) : [];
+  return readEdgeJson(STORAGE_KEY, [], scope);
 }
 
 /**

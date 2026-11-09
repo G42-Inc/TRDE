@@ -297,8 +297,8 @@ export async function getTodos(): Promise<Todo[]> {
   return await fetchData<Todo>(`${API_BASE}/todos`);
 }
 
-export async function saveTodos(todos: Todo[]): Promise<void> {
-  await saveData<Todo>(`${API_BASE}/todos`, todos);
+export async function saveTodos(todos: Todo[], deletedIds: string[] = []): Promise<void> {
+  await saveData<Todo>(`${API_BASE}/todos`, todos, { deletedIds });
 }
 
 // ============================================
@@ -373,40 +373,10 @@ export async function saveDashboardMetrics(metrics: DashboardMetricId[]): Promis
 // ============================================
 
 export async function clearAllData(): Promise<void> {
-  // Clear all user data by calling each endpoint with empty arrays
-  // This is a destructive operation - we continue even if individual calls fail
-  const clearOperations = [
-    { name: 'trades', fn: () => saveData<Trade>(`${API_BASE}/trades`, [], { clearAll: true }) },
-    { name: 'strategies', fn: () => saveData<Strategy>(`${API_BASE}/strategies`, []) },
-    { name: 'strategy-versions', fn: () => saveData<StrategyVersion>(`${API_BASE}/strategy-versions`, []) },
-    { name: 'collections', fn: () => saveData<Collection>(`${API_BASE}/collections`, []) },
-    { name: 'daily-biases', fn: () => saveData<DailyBias>(`${API_BASE}/daily-biases`, []) },
-    { name: 'quick-journals', fn: () => saveData<DailyQuickJournal>(`${API_BASE}/quick-journals`, []) },
-    { name: 'saved-filters', fn: () => saveData<SavedFilter>(`${API_BASE}/saved-filters`, []) },
-    { name: 'journals', fn: () => saveData<TradeJournal>(`${API_BASE}/journals`, []) },
-    { name: 'weekly-reviews', fn: () => saveData<WeeklyReview>(`${API_BASE}/weekly-reviews`, []) },
-    { name: 'todos', fn: () => saveData<Todo>(`${API_BASE}/todos`, []) },
-    { name: 'rule-violations', fn: () => saveData<RuleViolation>(`${API_BASE}/rule-violations`, []) },
-  ];
-
-  const errors: string[] = [];
-  
-  // Run all operations and collect errors
-  await Promise.all(
-    clearOperations.map(async (op) => {
-      try {
-        await op.fn();
-        console.log(`[clearAllData] Cleared ${op.name}`);
-      } catch (error) {
-        console.error(`[clearAllData] Failed to clear ${op.name}:`, error);
-        errors.push(op.name);
-      }
-    })
-  );
-
-  // If there were errors, throw with details but data is still cleared locally
-  if (errors.length > 0) {
-    console.warn(`[clearAllData] Some cloud data may not have been cleared: ${errors.join(', ')}`);
-    // Don't throw - local data is cleared, cloud can be re-synced
-  }
+  const response = await fetch(`${API_BASE}/clear-journal`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirmation: 'DELETE JOURNAL DATA' }),
+  });
+  if (!response.ok) throw await responseError(response);
 }

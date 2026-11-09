@@ -15,9 +15,10 @@ import { format } from 'date-fns';
 
 interface SubscriptionInfo {
   plan: string;
-  status: 'active' | 'past_due' | 'canceled' | 'comped';
+  status: 'active' | 'past_due' | 'canceled' | 'comped' | 'demo';
   periodEnd: string | null;
   hasSubscription: boolean;
+  canManageBilling: boolean;
 }
 
 export function SubscriptionSection() {
@@ -26,42 +27,36 @@ export function SubscriptionSection() {
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!isLoaded || !user) return;
 
+    let active = true;
     const fetchSubscription = async () => {
+      setLoading(true);
+      setError(null);
       try {
         const response = await fetch('/api/billing/subscription');
-        if (response.ok) {
-          const data = await response.json();
-          setSubscription(data);
-        } else {
-          setSubscription({
-            plan: 'none',
-            status: 'canceled',
-            periodEnd: null,
-            hasSubscription: false,
-          });
-        }
+        if (!response.ok) throw new Error('Unable to load subscription');
+        const data = await response.json();
+        if (active) setSubscription(data);
       } catch (error) {
-        console.error('Error fetching subscription:', error);
-        setSubscription({
-          plan: 'none',
-          status: 'canceled',
-          periodEnd: null,
-          hasSubscription: false,
-        });
+        if (active) setError('Could not load your subscription. Please retry.');
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     fetchSubscription();
-  }, [isLoaded, user]);
+    return () => { active = false; };
+  }, [isLoaded, user?.id, reload]);
 
   const handleManageSubscription = async () => {
+    if (!subscription?.canManageBilling) return;
     setPortalLoading(true);
+    setError(null);
     try {
       const response = await fetch('/api/billing/portal', {
         method: 'POST',
@@ -74,10 +69,10 @@ export function SubscriptionSection() {
       const data = await response.json();
       if (data.portalUrl) {
         window.location.href = data.portalUrl;
-      }
+      } else throw new Error('No portal URL returned');
     } catch (error: any) {
       console.error('Error opening portal:', error);
-      alert('Failed to open subscription management portal. Please try again.');
+      setError('Could not open billing management. Please retry.');
     } finally {
       setPortalLoading(false);
     }
@@ -85,7 +80,7 @@ export function SubscriptionSection() {
 
   if (loading) {
     return (
-      <div className="theme-bg-secondary p-6 rounded-xl border theme-border">
+      <div className="theme-bg-secondary p-4 sm:p-6 rounded-xl border theme-border">
         <div className="animate-pulse space-y-4">
           <div className="h-6 bg-theme-bg-tertiary rounded w-1/3"></div>
           <div className="h-4 bg-theme-bg-tertiary rounded w-1/2"></div>
@@ -94,15 +89,22 @@ export function SubscriptionSection() {
     );
   }
 
-  if (!subscription?.hasSubscription) {
+  if (error) return (
+    <div role="alert" className="theme-bg-secondary p-4 sm:p-6 rounded-xl border theme-border">
+      <p className="theme-text-secondary mb-4">{error}</p>
+      <button type="button" onClick={() => setReload((value) => value + 1)} className="theme-button px-4 py-2 rounded-lg">Retry</button>
+    </div>
+  );
+
+  if (!subscription?.hasSubscription || subscription.status === 'demo') {
     return (
-      <div className="theme-bg-secondary p-6 rounded-xl border theme-border">
+      <div className="theme-bg-secondary p-4 sm:p-6 rounded-xl border theme-border">
         <div className="flex items-center gap-3 mb-4">
           <CreditCardIcon className="w-6 h-6 theme-text" />
           <h2 className="text-xl font-semibold theme-text">Subscription</h2>
         </div>
         <p className="text-sm theme-text-secondary mb-4">
-          You don&apos;t have an active subscription. Choose a plan to get started.
+          {subscription?.status === 'demo' ? 'You are exploring the sample journal. Choose a plan to save your own trades.' : 'Choose a plan to activate your journal.'}
         </p>
         <button
           onClick={() => router.push('/pricing')}
@@ -120,6 +122,7 @@ export function SubscriptionSection() {
     past_due: 'text-yellow-500',
     canceled: 'text-danger',
     comped: 'text-accent',
+    demo: 'theme-text-secondary',
   };
 
   const statusLabels = {
@@ -127,10 +130,11 @@ export function SubscriptionSection() {
     past_due: 'Past Due',
     canceled: 'Canceled',
     comped: 'Complimentary',
+    demo: 'Demo',
   };
 
   return (
-    <div className="theme-bg-secondary p-6 rounded-xl border theme-border">
+    <div className="theme-bg-secondary p-4 sm:p-6 rounded-xl border theme-border">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <CreditCardIcon className="w-6 h-6 theme-text" />
@@ -160,7 +164,7 @@ export function SubscriptionSection() {
             return (
               <div className="flex justify-between items-center py-2">
                 <span className="text-sm theme-text-secondary">
-                  {subscription.status === 'canceled' ? 'Expires' : 'Renews'}
+                  {subscription.status === 'canceled' || subscription.status === 'comped' ? 'Access until' : 'Renews'}
                 </span>
                 <span className="font-semibold theme-text">
                   {format(periodEndDate, 'PPp')}
@@ -174,7 +178,7 @@ export function SubscriptionSection() {
         })()}
       </div>
 
-      <button
+      {subscription.canManageBilling ? <><button
         onClick={handleManageSubscription}
         disabled={portalLoading}
         className="w-full px-4 py-3 theme-button rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
@@ -195,6 +199,9 @@ export function SubscriptionSection() {
       <p className="text-xs theme-text-tertiary mt-3 text-center">
         Update payment method, change plan, or cancel subscription
       </p>
+      </> : <p className="text-sm theme-text-secondary">
+        {subscription.status === 'comped' ? 'Your complimentary access is enabled. No payment method is required.' : 'No billing account is linked to this access.'}
+      </p>}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useId } from 'react';
+import { ModalDialog } from '@/components/ModalDialog';
 import { useAppData } from '@/hooks/useAppData';
 import { calculateAllMetrics, METRIC_EXPLAINERS } from '@trde/core';
 import type { Trade } from '@trde/core';
@@ -21,7 +22,7 @@ interface MetricChartData {
 
 export default function AnalyticsPage() {
   const { theme } = useTheme();
-  const { trades, isLoading } = useAppData();
+  const { trades, collections, isLoading } = useAppData();
   const [mounted, setMounted] = useState(false);
   const [dateRange, setDateRange] = useState<'all' | '30' | '90' | '180'>('all');
   const [showChartFor, setShowChartFor] = useState<Record<string, boolean>>({});
@@ -56,17 +57,10 @@ export default function AnalyticsPage() {
   const tooltipText = isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)';
 
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
-    
-    return () => {
-      clearTimeout(timer);
-    };
+    setMounted(true);
   }, []);
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
     return (
       <div className="space-y-6">
         <SkeletonLoader width="200px" height="2rem" />
@@ -87,8 +81,6 @@ export default function AnalyticsPage() {
     );
   }
 
-  // Get collections to check for EDGE trades (not yet supported in demo)
-  const collections: { id: string; name: string }[] = [];
   const edgeCollection = collections.find((c) => c.name === 'EDGE');
 
   // Filter trades based on date range and EDGE toggle
@@ -755,7 +747,7 @@ export default function AnalyticsPage() {
   return (
     <div className="container-premium">
       {/* Premium header */}
-      <div className="flex items-center justify-between animate-slide-in-down" style={{ marginBottom: 'var(--space-2xl)' }}>
+      <div className="flex flex-wrap items-center justify-between gap-4 animate-slide-in-down" style={{ marginBottom: 'var(--space-2xl)' }}>
         <div>
           <h1 className="theme-text text-h1">Analytics</h1>
           <p className="theme-text-secondary text-body" style={{ marginTop: 'var(--space-sm)' }}>
@@ -773,7 +765,7 @@ export default function AnalyticsPage() {
 
       {/* Filters - Premium controls */}
       <div className="flex items-center animate-slide-in-up" style={{ gap: 'var(--space-lg)', marginBottom: 'var(--space-xl)' }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
+        <div className="flex flex-wrap items-center" style={{ gap: 'var(--space-md)' }}>
           <span className="theme-text-secondary text-body-sm font-medium">Time Period:</span>
           <select
             value={dateRange}
@@ -789,9 +781,10 @@ export default function AnalyticsPage() {
         </div>
         
         {/* EDGE Stats Toggle - Premium styling */}
-        <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
+        <div className="flex flex-wrap items-center" style={{ gap: 'var(--space-md)' }}>
           <span className="theme-text-secondary text-body-sm font-medium">Show EDGE Stats:</span>
           <button
+            role="switch" aria-label="Show EDGE Stats" aria-checked={showEdgeStats}
             onClick={() => setShowEdgeStats(!showEdgeStats)}
             className={`relative inline-flex items-center transition-all focus:outline-none focus:ring-2 active:scale-95 ${
               showEdgeStats
@@ -821,7 +814,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Metric Cards with Chart Toggle */}
-      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))' }}>
         <MetricCardWithChart
           metricId="winRate"
           label="Win Rate"
@@ -982,8 +975,8 @@ export default function AnalyticsPage() {
       )}
 
       {/* Premium Charts Grid */}
-      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))' }}>
-        <div className="card-premium hover-lift">
+      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 500px), 1fr))' }}>
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
           <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>R-Multiple Distribution</h2>
           <ResponsiveContainer key={`rDist-${theme}`} width="100%" height={300}>
             <BarChart data={rDistData}>
@@ -1020,10 +1013,10 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </div>
 
-        <div className="card-premium hover-lift">
-          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-lg)' }}>
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
+          <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: 'var(--space-lg)' }}>
             <h2 className="theme-text text-h3">Equity Curve</h2>
-            <div className="flex items-center space-x-6">
+            <div className="flex flex-wrap items-center gap-3">
               {/* X-Axis Toggle */}
               <div className="flex items-center space-x-2">
                 <button
@@ -1093,7 +1086,7 @@ export default function AnalyticsPage() {
                 </div>
               )}
               {/* Y-Axis Toggle */}
-              <div className="flex items-center space-x-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <span className={`text-sm font-medium ${equityView === 'R' ? 'text-accent' : 'theme-text-secondary'}`}>
                   R
                 </span>
@@ -1284,7 +1277,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Drawdown Chart */}
-        <div className="card-premium hover-lift">
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
           <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Drawdown Analysis</h2>
           {advancedStats && advancedStats.drawdownData.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
@@ -1325,10 +1318,10 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Dynamic Analytics Chart */}
-        <div className="card-premium hover-lift">
-          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-lg)' }}>
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
+          <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: 'var(--space-lg)' }}>
             <h2 className="theme-text text-h3">{getChartTitle()}</h2>
-            <div className="flex items-center space-x-3">
+            <div className="flex flex-wrap items-center gap-3">
               {/* Timeframe Selector (only shown for line charts) */}
               {getChartConfig().type === 'line' && (
                 <div className="flex items-center space-x-1">
@@ -1377,7 +1370,7 @@ export default function AnalyticsPage() {
               <select
                 value={selectedChart}
                 onChange={(e) => setSelectedChart(e.target.value as typeof selectedChart)}
-                className="px-3 py-1.5 theme-bg-tertiary border theme-border rounded-lg text-sm theme-text focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 transition-all duration-200"
+                className="max-w-full px-3 py-1.5 theme-bg-tertiary border theme-border rounded-lg text-sm theme-text focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 transition-all duration-200"
               >
                 <option value="rollingExpectancy">Rolling Expectancy</option>
                 <option value="winRate">Rolling Win Rate</option>
@@ -1632,8 +1625,8 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Monthly Performance Chart */}
-          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', marginTop: 'var(--space-xl)' }}>
-            <div className="card-premium hover-lift">
+          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 500px), 1fr))', marginTop: 'var(--space-xl)' }}>
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Monthly Performance</h2>
               {advancedStats.monthlyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1685,7 +1678,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Hourly Performance Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Performance by Hour</h2>
               {advancedStats.hourlyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1720,7 +1713,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Streak History Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Streak History</h2>
               {advancedStats.streakHistory.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1751,7 +1744,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Cumulative Win Rate Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Cumulative Win Rate</h2>
               {advancedStats.winRateOverTime.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1793,7 +1786,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Profit/Loss Ratio Over Time */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Ratio Over Time</h2>
               {advancedStats.plRatioOverTime.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1828,7 +1821,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Win/Loss Pie Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Distribution</h2>
               <div className="flex items-center justify-center">
                 <ResponsiveContainer width="100%" height={300}>
@@ -1887,6 +1880,7 @@ function MetricCardWithChart({
   showChart: boolean;
   onToggleChart: () => void;
 }) {
+  const modalTitleId = useId();
   const [showInfoModal, setShowInfoModal] = useState(false);
   const explainer = METRIC_EXPLAINERS[metricId];
 
@@ -1944,18 +1938,15 @@ function MetricCardWithChart({
       )}
 
       {showInfoModal && explainer && (
-        <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={() => setShowInfoModal(false)}
-        >
+        <ModalDialog isOpen onClose={() => setShowInfoModal(false)} labelledBy={modalTitleId} className="items-center justify-center">
           <div 
             className="theme-bg-secondary p-6 rounded-xl max-w-lg w-full max-h-[80vh] overflow-y-auto border theme-border shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4 border-b theme-border pb-4">
-              <h3 className="text-lg font-bold theme-text">{explainer.title}</h3>
+              <h3 id={modalTitleId} className="text-lg font-bold theme-text">{explainer.title}</h3>
               <button
-                onClick={() => setShowInfoModal(false)}
+                aria-label="Close metric details" onClick={() => setShowInfoModal(false)}
                 className="theme-text-secondary hover:theme-text transition-colors"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -1974,7 +1965,7 @@ function MetricCardWithChart({
               </Link>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
     </div>
   );

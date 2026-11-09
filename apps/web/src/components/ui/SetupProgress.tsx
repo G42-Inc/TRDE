@@ -68,7 +68,7 @@ export function SetupProgress({
       label: 'Create a Strategy',
       description: 'Define your trading approach',
       icon: ClipboardDocumentListIcon,
-      href: '/strategies/new',
+      href: '/strategies',
       isComplete: hasStrategy,
     },
     {
@@ -76,7 +76,7 @@ export function SetupProgress({
       label: 'Write Journal Entry',
       description: 'Document your trading mindset',
       icon: DocumentTextIcon,
-      href: '/journal/new',
+      href: '/journal',
       isComplete: hasJournalEntry,
     },
     {

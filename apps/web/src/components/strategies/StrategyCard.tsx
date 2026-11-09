@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { voteOnStrategy, getUserVote, type PublicStrategyCard } from '@/lib/actions/strategies.server';
+import { useToast } from '@/contexts/ToastContext';
 import { ChevronUpIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 
 interface StrategyCardProps {
@@ -10,6 +11,7 @@ interface StrategyCardProps {
 }
 
 export function StrategyCard({ strategy, onVoteChange }: StrategyCardProps) {
+  const { showToast } = useToast();
   const [userVote, setUserVote] = useState<1 | -1 | null>(null);
   const [upvotes, setUpvotes] = useState(strategy.upvotes);
   const [downvotes, setDownvotes] = useState(strategy.downvotes);
@@ -38,6 +40,7 @@ export function StrategyCard({ strategy, onVoteChange }: StrategyCardProps) {
     setVoting(true);
     try {
       const result = await voteOnStrategy(strategy.id, value);
+      if (!result.success) throw new Error(result.error || 'Could not save vote.');
       if (result.success) {
         setUpvotes(result.upvotes || 0);
         setDownvotes(result.downvotes || 0);
@@ -47,7 +50,7 @@ export function StrategyCard({ strategy, onVoteChange }: StrategyCardProps) {
         }
       }
     } catch (error) {
-      console.error('Error voting:', error);
+      showToast(error instanceof Error ? error.message : 'Could not save vote.', 'error');
     } finally {
       setVoting(false);
     }

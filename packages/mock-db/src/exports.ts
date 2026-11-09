@@ -1,10 +1,24 @@
 import type { Trade, WeeklyReview } from '@trde/core';
 import { AssetClass } from '@trde/core';
 
+function csvCell(value: string | number): string {
+  // Spreadsheet programs treat leading formula characters as executable cells.
+  // Numeric results remain numbers; user-entered text is always literal text.
+  let text = String(value);
+  if (typeof value === 'string' && /^[\s]*[=+\-@]/.test(text)) text = `'${text}`;
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function timestamp(value: number): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+
 export function exportTradesToCsv(trades: Trade[]): string {
   const headers = [
     'ID',
     'Asset Class',
+    'Instrument',
     'Date',
     'Entry Time',
     'Exit Time',
@@ -23,8 +37,8 @@ export function exportTradesToCsv(trades: Trade[]): string {
   ];
 
   const rows = trades.map((trade) => {
-    const entryTime = new Date(trade.entryTime).toISOString();
-    const exitTime = new Date(trade.exitTime).toISOString();
+    const entryTime = timestamp(trade.entryTime);
+    const exitTime = timestamp(trade.exitTime);
 
     let instrument = '';
     if (trade.assetClass === AssetClass.FUTURES) {
@@ -36,13 +50,14 @@ export function exportTradesToCsv(trades: Trade[]): string {
     return [
       trade.id,
       trade.assetClass,
+      instrument,
       trade.tradeDate,
       entryTime,
       exitTime,
       trade.direction,
       trade.quantity,
-      trade.resultUsd.toFixed(2),
-      trade.resultR.toFixed(2),
+      trade.resultUsd,
+      trade.resultR,
       trade.outcome,
       trade.grade,
       trade.strategyId,
@@ -50,11 +65,11 @@ export function exportTradesToCsv(trades: Trade[]): string {
       trade.mistakes.join('; '),
       trade.session,
       trade.marketRegime,
-      trade.notes.replace(/,/g, ';'), // Escape commas
+      trade.notes,
     ];
   });
 
-  const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
+  const csvContent = [headers.map(csvCell).join(','), ...rows.map((row) => row.map(csvCell).join(','))].join('\r\n');
   return csvContent;
 }
 

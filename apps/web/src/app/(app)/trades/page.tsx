@@ -8,20 +8,18 @@ import { AssetClass, Outcome } from '@trde/core';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
+import { TradeFiltersPanel } from '@/components/TradeFiltersPanel';
 import { formatSetupTag } from '@/lib/utils/formatEnum';
 import Link from 'next/link';
 import { TableCellsIcon, CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 export default function TradesPage() {
-  const { trades: allTrades, strategies, isLoading } = useAppData();
-  // Note: collections not available in demo mode, use empty array
-  const collections: Collection[] = [];
+  const { trades: allTrades, strategies, collections, isLoading } = useAppData();
   const [mounted, setMounted] = useState(false);
   const [filters, setFilters] = useState<TradeFilters>({});
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [assetFilter, setAssetFilter] = useState<string>('all');
-  const [outcomeFilter, setOutcomeFilter] = useState<string>('all');
-  const [collectionFilter, setCollectionFilter] = useState<string>('all');
+  const assetFilter = filters.edgeOnly ? 'edge' : filters.assetClass?.[0] || 'all';
+  const outcomeFilter = filters.outcome?.[0] || 'all';
+  const collectionFilter = filters.collections?.[0] || 'all';
   const [viewedEdgeTrades, setViewedEdgeTrades] = useState<Set<string>>(new Set());
   const router = useRouter();
 
@@ -46,57 +44,14 @@ export default function TradesPage() {
   };
 
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-      setViewedEdgeTrades(getViewedEdgeTrades());
-    }, 100);
-    
-    return () => {
-      clearTimeout(timer);
-    };
+    setMounted(true);
+    setViewedEdgeTrades(getViewedEdgeTrades());
   }, []);
 
-  useEffect(() => {
-    if (!mounted) return;
+  const trades = useMemo(() => {
+    if (!mounted) return [];
     
-    let filtered = allTrades;
-    
-    if (assetFilter !== 'all') {
-      if (assetFilter === 'edge') {
-        // Filter for EDGE trades
-        const edgeCollection = collections.find((c) => c.name === 'EDGE');
-        filtered = filtered.filter((t) => 
-          (edgeCollection && t.collections.includes(edgeCollection.id)) ||
-          t.notes?.startsWith('[EDGE')
-        );
-      } else {
-        // Filter by asset class (Futures or Options)
-        filtered = filtered.filter((t) => t.assetClass === assetFilter);
-      }
-    }
-    
-    if (outcomeFilter !== 'all') {
-      filtered = filtered.filter((t) => t.outcome === outcomeFilter);
-    }
-    
-    if (collectionFilter !== 'all') {
-      filtered = filtered.filter((t) => t.collections.includes(collectionFilter));
-    }
-    
-    // Note: EDGE trades now show alongside normal trades with "EDGE" type label
-    // The edgeFilter is removed - EDGE trades are part of the main trade list
-    
-    const additionalFilters = { ...filters };
-    if (assetFilter !== 'all' && assetFilter !== 'edge') {
-      // Only apply asset class filter if not filtering by EDGE
-      additionalFilters.assetClass = [assetFilter as AssetClass];
-    }
-    if (outcomeFilter !== 'all') {
-      additionalFilters.outcome = [outcomeFilter as Outcome];
-    }
-    
-    filtered = filterTrades(filtered, additionalFilters);
+    let filtered = filterTrades(allTrades, filters, collections.find(c => c.name === 'EDGE')?.id);
     // Sort by entry time descending (most recent first)
     // For EDGE trades, sort by createdAt (journal submission time) instead of entryTime
     // This allows EDGE trades to appear chronologically by when they were saved to journal
@@ -113,8 +68,8 @@ export default function TradesPage() {
       // Sort descending (most recent first)
       return bSortTime - aSortTime;
     });
-    setTrades(filtered);
-  }, [allTrades, filters, assetFilter, outcomeFilter, collectionFilter, collections, mounted]);
+    return filtered;
+  }, [allTrades, filters, collections, mounted]);
 
   const formatTradeDate = (trade: Trade) => {
     // For EDGE trades, use createdAt (journal submission time) for display
@@ -133,7 +88,7 @@ export default function TradesPage() {
     return strategy?.name || strategyId;
   };
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
     return (
       <div className="space-y-8 animate-fade-in">
         <div className="flex items-center justify-between">
@@ -206,8 +161,8 @@ export default function TradesPage() {
           {formatTradeDate(trade)}
         </td>
         <td className="whitespace-nowrap">
-          <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
-            <span className="theme-text font-bold text-body-lg">{symbol}</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href={`/trades/${trade.id}`} className="theme-text font-bold text-body-lg underline-offset-4 hover:underline" onClick={(event) => { event.stopPropagation(); if (isUnviewedEdgeTrade) markEdgeTradeAsViewed(trade.id); }}>{symbol}</Link>
             <span
               className="font-bold"
               style={{
@@ -291,7 +246,7 @@ export default function TradesPage() {
               color: trade.resultUsd > 0 ? 'var(--theme-success)' : trade.resultUsd < 0 ? 'var(--theme-error)' : 'var(--theme-text)'
             }}
           >
-            {trade.resultUsd > 0 ? '+' : ''}${Math.abs(trade.resultUsd).toFixed(0)}
+            {trade.resultUsd > 0 ? '+' : trade.resultUsd < 0 ? '-' : ''}${Math.abs(trade.resultUsd).toFixed(2)}
           </span>
         </td>
       </tr>
@@ -301,14 +256,14 @@ export default function TradesPage() {
   return (
     <div className="container-premium">
       {/* Premium Header Section */}
-      <div className="flex items-center justify-between animate-slide-in-down" style={{ marginBottom: 'var(--space-3xl)' }}>
+      <div className="flex flex-wrap items-center justify-between gap-4 animate-slide-in-down" style={{ marginBottom: 'var(--space-3xl)' }}>
         <div>
           <h1 className="theme-text text-h1">Trade Hub</h1>
           <p className="theme-text-secondary text-body" style={{ marginTop: 'var(--space-sm)' }}>
             Your complete trading history - {trades.length} {trades.length === 1 ? 'trade' : 'trades'} logged
           </p>
         </div>
-        <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
+        <div className="flex flex-wrap items-center gap-3">
           {/* View Toggle */}
           <div className="flex items-center p-1 theme-bg-secondary rounded-xl border theme-border">
             <span
@@ -326,8 +281,8 @@ export default function TradesPage() {
             </Link>
           </div>
           <select
-            value={assetFilter}
-            onChange={(e) => setAssetFilter(e.target.value)}
+            aria-label="Trade type" value={assetFilter}
+            onChange={(e) => setFilters(previous => ({ ...previous, edgeOnly: e.target.value === 'edge', assetClass: ['all', 'edge'].includes(e.target.value) ? undefined : [e.target.value as AssetClass] }))}
             className="theme-bg-secondary border theme-border theme-text focus:ring-2 focus:border-transparent transition-all hover:opacity-90 cursor-pointer"
             style={{ padding: 'var(--space-md) var(--space-lg)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--font-size-body-sm)', fontWeight: 'var(--font-weight-semibold)', transitionDuration: 'var(--transition-base)' }}
           >
@@ -337,8 +292,8 @@ export default function TradesPage() {
             <option value="edge">EDGE</option>
           </select>
           <select
-            value={outcomeFilter}
-            onChange={(e) => setOutcomeFilter(e.target.value)}
+            aria-label="Trade outcome" value={outcomeFilter}
+            onChange={(e) => setFilters(previous => ({ ...previous, outcome: e.target.value === 'all' ? undefined : [e.target.value as Outcome] }))}
             className="theme-bg-secondary border theme-border theme-text focus:ring-2 focus:border-transparent transition-all hover:opacity-90 cursor-pointer"
             style={{ padding: 'var(--space-md) var(--space-lg)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--font-size-body-sm)', fontWeight: 'var(--font-weight-semibold)', transitionDuration: 'var(--transition-base)' }}
           >
@@ -348,8 +303,8 @@ export default function TradesPage() {
             <option value={Outcome.BREAKEVEN}>Breakeven</option>
           </select>
           <select
-            value={collectionFilter}
-            onChange={(e) => setCollectionFilter(e.target.value)}
+            aria-label="Trade collection" value={collectionFilter}
+            onChange={(e) => setFilters(previous => ({ ...previous, collections: e.target.value === 'all' ? undefined : [e.target.value] }))}
             className="theme-bg-secondary border theme-border theme-text focus:ring-2 focus:border-transparent transition-all hover:opacity-90 cursor-pointer"
             style={{ padding: 'var(--space-md) var(--space-lg)', borderRadius: 'var(--radius-lg)', fontSize: 'var(--font-size-body-sm)', fontWeight: 'var(--font-weight-semibold)', transitionDuration: 'var(--transition-base)' }}
           >
@@ -363,6 +318,10 @@ export default function TradesPage() {
         </div>
       </div>
 
+      <details className="mb-6 theme-text">
+        <summary className="cursor-pointer py-3 font-semibold">More filters</summary>
+        <TradeFiltersPanel filters={filters} onFiltersChange={setFilters} />
+      </details>
       {/* Premium Table Container */}
       <div className="card-premium hover-lift" style={{ padding: '0', overflow: 'hidden' }}>
         <div className="overflow-x-auto custom-scrollbar">

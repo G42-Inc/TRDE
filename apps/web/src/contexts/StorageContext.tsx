@@ -169,6 +169,8 @@ export function StorageProvider({ children }: { children: React.ReactNode }) {
   const tradeSaveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
 
   // Refs for debouncing saves
+  const dataWriteQueues = useRef<Record<string, Promise<void>>>({});
+  const dataRevisions = useRef<Record<string, number>>({});
   const saveTimeoutRef = useRef<Record<string, NodeJS.Timeout>>({});
 
   // Load from local storage ONLY after we know the user
@@ -272,10 +274,12 @@ export function StorageProvider({ children }: { children: React.ReactNode }) {
     try {
       const userId = user.id;
       const tradeRevision = tradeRevisionRef.current;
+      const readRevisions = { ...dataRevisions.current };
       const syncItem = async <T,>(key: string, load: () => Promise<T>, apply: (value: T) => void) => {
         const value = await load();
         if (activeUserRef.current !== userId) return;
         if (key === 'trades' && tradeRevisionRef.current !== tradeRevision) return;
+        if ((dataRevisions.current[key] ?? 0) !== (readRevisions[key] ?? 0)) return;
         apply(value);
         setLocal(userId, key, value);
       };
@@ -421,6 +425,7 @@ export function StorageProvider({ children }: { children: React.ReactNode }) {
     } catch (error: any) {
       console.error('Error migrating to cloud:', error);
       setSyncError(error.message || 'Failed to migrate data');
+      throw error;
     } finally {
       setIsSyncing(false);
     }
@@ -507,178 +512,99 @@ export function StorageProvider({ children }: { children: React.ReactNode }) {
     return { newViolations, updatedViolations };
   }, [user, ruleViolations, trades]);
 
-  const handleSaveStrategies = useCallback(async (newStrategies: Strategy[]) => {
-    const userId = user?.id || null;
-    setStrategies(newStrategies);
-    setLocal(userId, 'strategies', newStrategies);
-    
-    if (user) {
-      debouncedCloudSave('strategies', () => cloudStorage.saveStrategies(newStrategies));
-    }
-  }, [user, debouncedCloudSave]);
-
-  const handleSaveVersions = useCallback(async (newVersions: StrategyVersion[]) => {
-    const userId = user?.id || null;
-    setVersions(newVersions);
-    setLocal(userId, 'versions', newVersions);
-    
-    if (user) {
-      debouncedCloudSave('versions', () => cloudStorage.saveVersions(newVersions));
-    }
-  }, [user, debouncedCloudSave]);
-
-  const handleSaveCollections = useCallback(async (newCollections: Collection[]) => {
-    const userId = user?.id || null;
-    setCollections(newCollections);
-    setLocal(userId, 'collections', newCollections);
-    
-    if (user) {
-      debouncedCloudSave('collections', () => cloudStorage.saveCollections(newCollections));
-    }
-  }, [user, debouncedCloudSave]);
-
-  const handleSaveSavedFilters = useCallback(async (newFilters: SavedFilter[]) => {
-    const userId = user?.id || null;
-    setSavedFilters(newFilters);
-    setLocal(userId, 'savedFilters', newFilters);
-    
-    if (user) {
-      debouncedCloudSave('savedFilters', () => cloudStorage.saveSavedFilters(newFilters));
-    }
-  }, [user, debouncedCloudSave]);
-
-  const handleSaveDailyBiases = useCallback(async (newBiases: DailyBias[]) => {
+  // A successful Save means the owned cloud write completed, not just a queued timer.
+  const persistUserData = useCallback(async <T,>(key: string, value: T, write: (value: T) => Promise<void>, apply: (value: T) => void) => {
     const userId = user?.id;
-    if (!userId) throw new Error('Please sign in to save your journal.');
-    try {
-      await cloudStorage.saveDailyBiases(newBiases);
-    } catch (error) {
-      setSyncError('Journal was not saved to the cloud. Please try again.');
+    if (!userId) throw new Error('Please sign in to save your data.');
+    const revision = (dataRevisions.current[key] ?? 0) + 1;
+    dataRevisions.current[key] = revision;
+    const pending = (dataWriteQueues.current[key] ?? Promise.resolve()).catch(() => {}).then(() => {
+      if (activeUserRef.current !== userId) throw new Error('Account changed before saving. Please retry.');
+      return write(value);
+    });
+    dataWriteQueues.current[key] = pending;
+    try { await pending; } catch (error) {
+      if (activeUserRef.current === userId) setSyncError('Changes were not saved. Please try again.');
       throw error;
     }
-    if (activeUserRef.current !== userId) return;
+    if (activeUserRef.current !== userId || dataRevisions.current[key] !== revision) return;
+    dataRevisions.current[key] += 1;
     setSyncError(null);
-    setDailyBiases(newBiases);
-    setLocal(userId, 'dailyBiases', newBiases);
+    apply(value);
+    setLocal(userId, key, value);
   }, [user]);
 
-  const handleSaveQuickJournals = useCallback(async (newJournals: DailyQuickJournal[]) => {
-    const userId = user?.id;
-    if (!userId) throw new Error('Please sign in to save your journal.');
-    try {
-      await cloudStorage.saveQuickJournals(newJournals);
-    } catch (error) {
-      setSyncError('Journal was not saved to the cloud. Please try again.');
-      throw error;
-    }
-    if (activeUserRef.current !== userId) return;
-    setSyncError(null);
-    setQuickJournals(newJournals);
-    setLocal(userId, 'quickJournals', newJournals);
-  }, [user]);
+  const handleSaveStrategies = useCallback(async (value: Strategy[]) => {
+    await persistUserData('strategies', value, cloudStorage.saveStrategies, setStrategies);
+  }, [persistUserData]);
 
-  const handleSaveRiskRules = useCallback(async (newRules: RiskRules) => {
-    const userId = user?.id || null;
-    setRiskRules(newRules);
-    setLocal(userId, 'riskRules', newRules);
-    
-    if (user) {
-      debouncedCloudSave('riskRules', () => cloudStorage.saveRiskRules(newRules));
-    }
-  }, [user, debouncedCloudSave]);
+  const handleSaveVersions = useCallback(async (value: StrategyVersion[]) => {
+    await persistUserData('versions', value, cloudStorage.saveVersions, setVersions);
+  }, [persistUserData]);
 
-  const handleSaveJournals = useCallback(async (newJournals: TradeJournal[]) => {
-    const userId = user?.id;
-    if (!userId) throw new Error('Please sign in to save your journal.');
-    try {
-      await cloudStorage.saveJournals(newJournals);
-    } catch (error) {
-      setSyncError('Journal was not saved to the cloud. Please try again.');
-      throw error;
-    }
-    if (activeUserRef.current !== userId) return;
-    setSyncError(null);
-    setJournals(newJournals);
-    setLocal(userId, 'journals', newJournals);
-  }, [user]);
+  const handleSaveCollections = useCallback(async (value: Collection[]) => {
+    await persistUserData('collections', value, cloudStorage.saveCollections, setCollections);
+  }, [persistUserData]);
 
-  const handleSaveWeeklyReviews = useCallback(async (newReviews: WeeklyReview[]) => {
-    const userId = user?.id || null;
-    setWeeklyReviews(newReviews);
-    setLocal(userId, 'weeklyReviews', newReviews);
-    
-    if (user) {
-      debouncedCloudSave('weeklyReviews', () => cloudStorage.saveWeeklyReviews(newReviews));
-    }
-  }, [user, debouncedCloudSave]);
+  const handleSaveSavedFilters = useCallback(async (value: SavedFilter[]) => {
+    await persistUserData('savedFilters', value, cloudStorage.saveSavedFilters, setSavedFilters);
+  }, [persistUserData]);
 
-  const handleSaveTodos = useCallback(async (newTodos: Todo[]) => {
-    const userId = user?.id || null;
-    setTodos(newTodos);
-    setLocal(userId, 'todos', newTodos);
-    
-    if (user) {
-      debouncedCloudSave('todos', () => cloudStorage.saveTodos(newTodos));
-    }
-  }, [user, debouncedCloudSave]);
+  const handleSaveDailyBiases = useCallback(async (value: DailyBias[]) => {
+    await persistUserData('dailyBiases', value, cloudStorage.saveDailyBiases, setDailyBiases);
+  }, [persistUserData]);
 
-  const handleSaveRuleViolations = useCallback(async (newViolations: RuleViolation[]) => {
-    const userId = user?.id || null;
-    setRuleViolations(newViolations);
-    setLocal(userId, 'ruleViolations', newViolations);
-    
-    if (user) {
-      debouncedCloudSave('ruleViolations', () => cloudStorage.saveRuleViolations(newViolations));
-    }
-  }, [user, debouncedCloudSave]);
+  const handleSaveQuickJournals = useCallback(async (value: DailyQuickJournal[]) => {
+    await persistUserData('quickJournals', value, cloudStorage.saveQuickJournals, setQuickJournals);
+  }, [persistUserData]);
 
-  const handleSaveDashboardMetrics = useCallback(async (newMetrics: DashboardMetricId[]) => {
-    const userId = user?.id || null;
-    setDashboardMetrics(newMetrics);
-    setLocal(userId, 'dashboardMetrics', newMetrics);
-    
-    if (user) {
-      debouncedCloudSave('dashboardMetrics', () => cloudStorage.saveDashboardMetrics(newMetrics));
-    }
-  }, [user, debouncedCloudSave]);
+  const handleSaveRiskRules = useCallback(async (value: RiskRules) => {
+    await persistUserData('riskRules', value, cloudStorage.saveRiskRules, setRiskRules);
+  }, [persistUserData]);
+
+  const handleSaveJournals = useCallback(async (value: TradeJournal[]) => {
+    await persistUserData('journals', value, cloudStorage.saveJournals, setJournals);
+  }, [persistUserData]);
+
+  const handleSaveWeeklyReviews = useCallback(async (value: WeeklyReview[]) => {
+    await persistUserData('weeklyReviews', value, cloudStorage.saveWeeklyReviews, setWeeklyReviews);
+  }, [persistUserData]);
+
+  const handleSaveTodos = useCallback(async (value: Todo[]) => {
+    const deletedIds = todos.filter((todo) => !value.some((next) => next.id === todo.id)).map((todo) => todo.id);
+    await persistUserData('todos', value, (next) => cloudStorage.saveTodos(next, deletedIds), setTodos);
+  }, [persistUserData, todos]);
+
+  const handleSaveRuleViolations = useCallback(async (value: RuleViolation[]) => {
+    await persistUserData('ruleViolations', value, cloudStorage.saveRuleViolations, setRuleViolations);
+  }, [persistUserData]);
+
+  const handleSaveDashboardMetrics = useCallback(async (value: DashboardMetricId[]) => {
+    await persistUserData('dashboardMetrics', value, cloudStorage.saveDashboardMetrics, setDashboardMetrics);
+  }, [persistUserData]);
 
   const handleClearAllData = useCallback(async () => {
-    // Clear local state first (this always works)
-    setTrades([]);
-    setStrategies([]);
-    setVersions([]);
-    setCollections([]);
-    setSavedFilters([]);
-    setDailyBiases([]);
-    setQuickJournals([]);
-    setRiskRules(null);
-    setJournals([]);
-    setWeeklyReviews([]);
-    setTodos([]);
-    setRuleViolations([]);
-    setDashboardMetrics(['totalPnLUsd', 'winRate', 'profitFactor', 'mistakeTaxUsd']);
-    
-    // Clear user-scoped localStorage
     const userId = user?.id;
-    if (userId) {
-      try {
-        clearUserLocalStorage(userId);
-        console.log('[Storage] User-scoped local storage cleared');
-      } catch (error) {
-        console.error('[Storage] Error clearing localStorage:', error);
-      }
+    if (!userId) throw new Error('Please sign in to delete journal data.');
+    Object.values(saveTimeoutRef.current).forEach(clearTimeout);
+    saveTimeoutRef.current = {};
+    await Promise.allSettled([tradeSaveQueueRef.current, ...Object.values(dataWriteQueues.current)]);
+    if (activeUserRef.current !== userId) throw new Error('Account changed. Please retry.');
+    try { await cloudStorage.clearAllData(); } catch (error) {
+      setSyncError('Deletion did not complete. Refresh to check your data before retrying.');
+      throw error;
     }
-    
-    // Clear cloud (if authenticated) - don't throw if this fails
-    if (user) {
-      try {
-        await cloudStorage.clearAllData();
-        console.log('[Storage] Cloud data cleared');
-      } catch (error) {
-        console.error('[Storage] Error clearing cloud data:', error);
-        // Don't throw - local data is already cleared
-      }
+    if (activeUserRef.current !== userId) return;
+    tradeRevisionRef.current += 1;
+    for (const key of ['strategies', 'versions', 'collections', 'savedFilters', 'dailyBiases', 'quickJournals', 'riskRules', 'journals', 'weeklyReviews', 'todos', 'ruleViolations', 'dashboardMetrics']) {
+      dataRevisions.current[key] = (dataRevisions.current[key] ?? 0) + 1;
     }
+    clearUserLocalStorage(userId);
+    setTrades([]); setStrategies([]); setVersions([]); setCollections([]); setSavedFilters([]);
+    setDailyBiases([]); setQuickJournals([]); setRiskRules(null); setJournals([]);
+    setWeeklyReviews([]); setTodos([]); setRuleViolations([]);
+    setDashboardMetrics(['totalPnLUsd', 'winRate', 'profitFactor', 'mistakeTaxUsd']);
+    setSyncError(null);
   }, [user]);
 
   // Refresh from localStorage (for when other tabs update)

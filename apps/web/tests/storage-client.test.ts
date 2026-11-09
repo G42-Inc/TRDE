@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getTrades, saveTrades, saveDailyBiases, saveQuickJournals, saveVersions, saveSavedFilters, saveWeeklyReviews } from '../src/lib/storage.db';
+import { getTrades, saveTrades, saveDailyBiases, saveQuickJournals, saveVersions, saveSavedFilters, saveWeeklyReviews, saveTodos } from '../src/lib/storage.db';
 
 test('trade reads distinguish failed requests from an empty journal', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ error: 'Unavailable' }), { status: 503 }));
@@ -43,4 +43,15 @@ test('trade removal identifies only explicitly deleted records', async (t) => {
   await saveTrades([], ['trade-123']);
   assert.deepEqual(bodies[0], { trades: [], deletedIds: ['trade-123'] });
   assert.equal('clearAll' in bodies[0], false);
+});
+
+test('task removal sends explicit IDs and an empty cache never implies delete all', async (t) => {
+  const bodies: unknown[] = [];
+  t.mock.method(globalThis, 'fetch', async (_url: string, options: RequestInit) => {
+    bodies.push(JSON.parse(options.body as string));
+    return new Response(JSON.stringify({ success: true }));
+  });
+  await saveTodos([], ['completed-task']);
+  await saveTodos([]);
+  assert.deepEqual(bodies, [{ todos: [], deletedIds: ['completed-task'] }, { todos: [], deletedIds: [] }]);
 });

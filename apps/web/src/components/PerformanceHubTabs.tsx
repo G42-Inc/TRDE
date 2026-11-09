@@ -58,22 +58,20 @@ export function PerformanceHubTabs({
         </h1>
 
         {/* Tab Navigation */}
-        <div className="flex items-center border-b" style={{ gap: 'var(--space-md)', borderColor: 'var(--theme-border)' }}>
+        <div className="flex items-center border-b" style={{ gap: 'var(--space-sm)', borderColor: 'var(--theme-border)' }}>
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
+                aria-pressed={isActive}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center transition-all font-semibold border-b-2 ${
+                className={`flex items-center gap-2 px-3 py-3 text-sm sm:px-6 sm:py-4 sm:text-lg transition-all font-semibold border-b-2 ${
                   isActive
                     ? ''
                     : 'theme-text-secondary hover:theme-text'
                 }`}
                 style={{
-                  padding: 'var(--space-lg) var(--space-xl)',
-                  gap: 'var(--space-md)',
-                  fontSize: 'var(--font-size-body-lg)',
                   borderColor: isActive ? 'var(--theme-primary)' : 'transparent',
                   color: isActive ? 'var(--theme-primary)' : undefined,
                   marginBottom: '-2px',

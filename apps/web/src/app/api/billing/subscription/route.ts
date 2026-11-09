@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { checkUserAccess } from '@/lib/auth/entitlements.server';
+import { getStripeCustomerId } from '@/lib/stripe/customer';
 
 /**
  * GET /api/billing/subscription
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
         status: 'canceled',
         periodEnd: null,
         hasSubscription: false,
+        canManageBilling: false,
       });
     }
 
@@ -36,6 +38,7 @@ export async function GET(request: NextRequest) {
       status: accessCheck.entitlement.status,
       periodEnd: accessCheck.entitlement.current_period_end,
       hasSubscription: true,
+      canManageBilling: !['comped', 'demo'].includes(accessCheck.entitlement.status) && Boolean(await getStripeCustomerId(userId)),
     });
   } catch (error: any) {
     console.error('Error fetching subscription:', error);

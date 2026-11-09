@@ -1,6 +1,6 @@
 'use client';
 
-import { motion, AnimatePresence } from 'framer-motion';
+import { ModalDialog } from './ModalDialog';
 import { XMarkIcon } from '@heroicons/react/24/outline';
 import { ALL_SHORTCUTS } from '@/hooks/useKeyboardShortcuts';
 
@@ -16,28 +16,16 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={(e) => e.target === e.currentTarget && onClose()}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.15 }}
-            className="w-full max-w-lg glass-surface-dark rounded-2xl shadow-2xl overflow-hidden"
-          >
+    <ModalDialog isOpen={isOpen} onClose={onClose} labelledBy="keyboard-shortcuts-title" className="items-center justify-center">
+      <section className="max-h-[85dvh] w-full max-w-lg overflow-auto rounded-2xl border border-white/15 bg-slate-950 text-white shadow-2xl">
             {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-white/10">
-              <h2 className="text-xl font-bold text-white">Keyboard Shortcuts</h2>
+              <h2 id="keyboard-shortcuts-title" className="text-xl font-bold text-white">Keyboard Shortcuts</h2>
               <button
                 onClick={onClose}
-                className="text-white/50 hover:text-white transition-colors"
+                aria-label="Close keyboard shortcuts"
+                autoFocus
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white/70 hover:text-white transition-colors"
               >
                 <XMarkIcon className="w-6 h-6" />
               </button>
@@ -54,7 +42,7 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
                   {categories.actions.map((shortcut, i) => (
                     <div
                       key={i}
-                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-white/5"
+                      className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-lg hover:bg-white/5"
                     >
                       <span className="text-white/80">{shortcut.description}</span>
                       <div className="flex items-center gap-1">
@@ -84,7 +72,7 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
                   {categories.navigation.map((shortcut, i) => (
                     <div
                       key={i}
-                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-white/5"
+                      className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 rounded-lg hover:bg-white/5"
                     >
                       <span className="text-white/80">{shortcut.description}</span>
                       <div className="flex items-center gap-1">
@@ -109,9 +97,7 @@ export function KeyboardShortcutsHelp({ isOpen, onClose }: KeyboardShortcutsHelp
                 Press <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono">Esc</kbd> to close
               </p>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+      </section>
+    </ModalDialog>
   );
 }

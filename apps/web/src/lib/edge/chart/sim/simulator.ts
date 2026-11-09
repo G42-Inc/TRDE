@@ -39,7 +39,7 @@ export function createSimSession(
     sessionId,
     contractId,
     contractName, // Store contractName in session state
-    position: { qty: 0, avgPrice: null, entryTimeUtc: null },
+    position: { qty: 0, avgPrice: null, entryTimeUtc: null, entryFeesUsd: 0 },
     fills: [],
     closedTrades: [],
     orderIntents: [],
@@ -94,7 +94,7 @@ export function processFills(
 
   if (intentsToFill.length === 0) return session;
 
-  let newPosition = { ...session.position };
+  let newPosition = positionWithEntryFees(session);
   const newFills: SimFill[] = [];
   const newClosedTrades: SimTradeClosed[] = [];
   const remainingIntents = session.orderIntents.filter(
@@ -153,6 +153,24 @@ export function processFills(
   };
 }
 
+function positionWithEntryFees(session: SimSessionState): SimPosition {
+  if (session.position.entryFeesUsd !== undefined) return { ...session.position };
+  let quantity = 0;
+  let fees = 0;
+  for (const fill of session.fills) {
+    const change = fill.side === 'BUY' ? fill.qty : -fill.qty;
+    if (quantity === 0 || Math.sign(quantity) === Math.sign(change)) {
+      fees += fill.feesApplied;
+    } else if (Math.abs(change) <= Math.abs(quantity)) {
+      fees *= (Math.abs(quantity) - Math.abs(change)) / Math.abs(quantity);
+    } else {
+      fees = fill.feesApplied * (Math.abs(change) - Math.abs(quantity)) / Math.abs(change);
+    }
+    quantity += change;
+  }
+  return { ...session.position, entryFeesUsd: fees };
+}
+
 /**
  * Process a single fill and update position
  */
@@ -176,6 +194,7 @@ function processFill(
       qty: newQty,
       avgPrice: fill.price,
       entryTimeUtc: fill.timeUtc,
+      entryFeesUsd: fill.feesApplied,
     };
   }
   // Case 2: Adding to existing position (same direction)
@@ -185,6 +204,7 @@ function processFill(
     position = {
       qty: newQty,
       avgPrice: totalCost / totalQty,
+      entryFeesUsd: (position.entryFeesUsd ?? 0) + fill.feesApplied,
       entryTimeUtc: position.entryTimeUtc, // Keep original entry time when scaling in
     };
   }
@@ -209,7 +229,8 @@ function processFill(
         contract
       );
 
-      const fees = calculateFees(closingQty, settings.commissionPerContractPerSide);
+      const fees = (position.entryFeesUsd ?? 0) * closingQty / absCurrentQty
+        + fill.feesApplied * closingQty / absFillQty;
 
       const closedTrade: SimTradeClosed = {
         id: `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -240,6 +261,7 @@ function processFill(
       position = {
         qty: position.qty > 0 ? remainingQty : -remainingQty,
         avgPrice: position.avgPrice, // Keep same avg price
+        entryFeesUsd: (position.entryFeesUsd ?? 0) * remainingQty / absCurrentQty,
         entryTimeUtc: position.entryTimeUtc, // Keep same entry time
       };
     } else if (absNewQty > 0) {
@@ -247,6 +269,7 @@ function processFill(
       position = {
         qty: newQty,
         avgPrice: fill.price,
+        entryFeesUsd: fill.feesApplied * absNewQty / absFillQty,
         entryTimeUtc: fill.timeUtc, // New entry time for flipped position
       };
     } else {
@@ -255,6 +278,7 @@ function processFill(
         qty: 0,
         avgPrice: null,
         entryTimeUtc: null,
+        entryFeesUsd: 0,
       };
     }
   }
@@ -302,7 +326,7 @@ export function placeMarketOrderImmediate(
 
   // Process fill immediately
   const { position, closedTrades } = processFill(
-    session.position,
+    positionWithEntryFees(session),
     fill,
     contract,
     session.contractId,
@@ -345,7 +369,7 @@ export function closePosition(
 export function resetSimulation(session: SimSessionState): SimSessionState {
   return {
     ...session,
-    position: { qty: 0, avgPrice: null, entryTimeUtc: null },
+    position: { qty: 0, avgPrice: null, entryTimeUtc: null, entryFeesUsd: 0 },
     fills: [],
     closedTrades: [],
     orderIntents: [],
