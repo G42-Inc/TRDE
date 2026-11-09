@@ -1,10 +1,24 @@
 # TRDE on Cloudflare Workers
 
-The existing application is packaged as a full-stack Worker using OpenNext. It
-retains the Next.js pages, API routes, server actions, Clerk identity, Supabase
-data, and Stripe billing. Source belongs in **G42-Inc/TRDE**. This configuration
-does not establish that a live deployment or authenticated persistence has passed;
-see `HANDOFF.md` for the latest verified status.
+Live app: **[trde.rr-seshify.workers.dev](https://trde.rr-seshify.workers.dev)**.
+The existing Next.js application runs as a full-stack OpenNext Worker with Clerk
+identity and a dedicated Supabase database. Source remains in **G42-Inc/TRDE**, on
+`work/cloudflare-deployment` with [PR #1](https://github.com/G42-Inc/TRDE/pull/1).
+`main` still contains the original public baseline. See `HANDOFF.md` for the
+current acceptance checkpoint and outstanding work.
+
+| Deployment | Source checkpoint | Cloudflare version |
+| --- | --- | --- |
+| Initial usable API deployment | `430e6570c702d356ead9a78fabfc46eba2a8b1ed` | `d63028ab-20cb-4b89-bd1a-5758dbc6bd88` |
+| Optional strategy and local form dates | `7b8573d73a3d567116daae6eff7553d2ae8f89f8` | `179f00e0-3221-4844-9f13-c4fe7c2b3a0d` |
+| Correct contract calculations, preserve imported history, and safe Clerk replay | `d3040c54c72ab9abe0f56b36ae91ba91301f2be8` | `f41c9a33-ff74-4a5a-aea6-4e79e7275893` |
+| Preserve unsaved drafts during background refresh | `7178054f0415c159cf7cc361c66b883ea930a8e7` | `5794e405-0cce-458c-ad73-00c480276bb9` |
+
+The fourth version is live and passes 49 focused tests, production builds, type
+validation and artifact secret scans. All nine authenticated API acceptance
+groups and the signed Clerk replay regression passed on the third version; the
+fourth changes only editor initialization and passed its immediate edit/save/reload
+browser regression. Final browser calculation and sign-out checks passed.
 
 ## Build and preview
 
@@ -89,7 +103,7 @@ deployments; it does not configure any missing values.
    workers.dev subdomain. Review any plan or resource costs before enabling them.
 2. Configure the matching Clerk instance and webhook destination for the resulting
    HTTPS URL. Configure the Stripe test webhook endpoint if testing billing.
-3. Run the checks above and deploy with `pnpm --filter web deploy` from the root.
+3. Run the checks above and deploy the guarded build with the command below.
    For Cloudflare Workers Builds, connect the existing **G42-Inc/TRDE** repository,
    retain the monorepo context, and use the same install/build/deploy commands.
 4. Record the URL emitted by Cloudflare; do not infer it from the Worker name.
@@ -104,9 +118,33 @@ deployments; it does not configure any missing values.
 8. Record the deployed commit, observed URL, checks, and remaining limitations in
    `HANDOFF.md`, then publish the coherent source changes to G42-Inc/TRDE.
 
+The verified deployment command, from `apps/web`, is:
+
+```sh
+node scripts/prepare-worker.mjs
+pnpm exec wrangler deploy --secrets-file /tmp/trde-worker-secrets.json
+```
+
+The JSON file is a private local runtime-binding map with permissions `600`.
+Prepare it from the intended configuration without printing values or adding it
+to Git. `--secrets-file` uploads those bindings with the Worker version;
+`--env-file` alone does not upload runtime secrets. The configured account and
+Worker are already authorized. No paid Cloudflare upgrade was needed.
+
 ## Billing verification
 
-Billing remains in Stripe test mode until a separate payment acceptance pass.
+Clerk uses its development instance and Stripe uses **test mode**. Actual
+provider deliveries were verified: Clerk user.created/user.updated/user.deleted
+each received HTTP 200, creating/updating the profile; Stripe subscription.created,
+invoice.payment_succeeded, and subscription.deleted each had no pending webhook
+deliveries and successful audit rows. The test entitlement changed from active
+to canceled. The marked provider fixtures were removed, with no real charges.
+Hosted Checkout browser completion has not been exercised. The final version
+also passed a signed Clerk creation-event replay after the fixture had an active
+Pro entitlement, earned XP, and custom notification choices: all were preserved,
+while user.updated still refreshed its profile. The four replay fixture rows
+were removed.
+
 Failed webhook attempts now remain eligible for redelivery, successful retries
 clear the failure record, and completed deliveries deduplicate. Processing
 failures return HTTP 500 so Stripe can retry. The local retry queue stores the
@@ -115,27 +153,40 @@ Regression tests exercise signed deliveries, database failures followed by
 recovery, duplicates, queue payloads, and legacy retry recovery. These fixes do
 not by themselves verify real payments or every subscription lifecycle case.
 
-## Validation recorded on November 8, 2026
+## Verified status and limits
 
-The production Next build and complete OpenNext build passed with type checking
-enabled. Wrangler's initial dry run reported 2,440.68 KiB compressed Worker code
-and 444 public asset files. The refreshed backend build passed as well. After
-the environment guard ran, a scan of the complete Worker output found no values
-matching configured private keys and secrets. A regression test verifies both
-public-config preservation and rejection of secrets embedded elsewhere in the
-generated server bundle.
+The production Next/OpenNext builds, type checks, and artifact secret scans passed.
+The current deployed build compressed to 2,439.58 KiB. Its landing page returned
+HTTP 200; signed-out and forged-header trade API requests returned HTTP 401.
+Nine acceptance groups using real Clerk tokens passed on the live URL, covering
+authenticated data save/read/edit and account isolation. Signed synthetic Stripe
+failed-event recovery and duplicate suppression also passed against the live
+database, and their temporary record was removed.
 
-The local Workers preview returned HTTP 200 for the landing page, HTTP 401 JSON
-for signed-out trade API access, HTTP 401 for a forged `x-clerk-user-id` header,
-and a sign-in redirect for the protected trade page. An invalid Stripe webhook
-signature returned HTTP 400. The Clerk webhook returned HTTP 500 because its
-signing secret was not configured. Five focused runtime tests passed: lazy
-configuration, Stripe fetch/signatures (including tampering and expiration),
-token encryption, React text escaping, and ProjectX credential redaction.
+Browser sign-in, dashboard loading, a first trade without a strategy, and local
+form dates were verified. Browser QA then found an inherited futures tick-value
+calculation bug and imported-P&L overwrite on notes-only editing. The current
+version corrects new calculations and preserves saved amounts, fees, subminute
+timestamps, and overnight dates during review-only edits. Its 12 known futures
+contracts use exchange-verified tick specifications; other instruments require
+explicit specs when recalculating. Historical records are not rewritten. The
+live browser saved an ES 4000→4010 trade, quantity 1 and $10 fees, as $490;
+a notes-only edit preserved $490, and setting fees to $0 produced $500. Every
+change survived reload. The final editor also passed immediate fill/save/reload,
+retaining the note and $500 result. Drafts use a single authenticated snapshot
+per account and trade, so background refresh cannot replace unsaved input.
 
-These checks used the local configuration and do **not** establish working remote
-database access, authenticated save/read/edit, or a live Cloudflare URL. Public
-backend configuration changes require a fresh build before deployment.
+Both marked acceptance users and their records were removed after verification;
+cleanup confirmed zero owned rows across 30 user-data tables and revoked sessions.
+The temporary deployment binding map was deleted; ignored local configuration is
+retained privately. No task preview server remains running.
+
+This is a fresh dedicated database. No historical records were migrated from the
+original inaccessible backend. Test-mode identity/billing, optional broker
+connections, legacy analytics, and mobile are not production certification.
+Both webhook signing secrets are configured privately. Changing public backend
+configuration requires a fresh build; rotating stored-data encryption keys
+requires a separate migration plan.
 
 ## References
 

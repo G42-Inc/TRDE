@@ -1,6 +1,10 @@
 # TRDE - Trading Journal Monorepo
 
-A frontend-only prototype trading journal for futures and options traders.
+A trading journal for futures and options traders, with a Next.js web app, Clerk authentication, Supabase persistence, and an Expo mobile companion.
+
+**Live web app: [trde.rr-seshify.workers.dev](https://trde.rr-seshify.workers.dev)**
+
+The Workers deployment uses a fresh database and development/test-mode Clerk and Stripe configuration. See [deployment instructions](docs/CLOUDFLARE.md) and the [current handoff](docs/HANDOFF.md) for verified behavior, configuration, and remaining scope.
 
 ## Structure
 
@@ -14,7 +18,7 @@ A frontend-only prototype trading journal for futures and options traders.
 
 ```bash
 # Install dependencies
-pnpm install
+pnpm install --frozen-lockfile
 
 # Run web app
 pnpm dev:web
@@ -35,4 +39,4 @@ pnpm dev:mobile
 
 ## Note
 
-This is a frontend-only prototype using localStorage (web) and AsyncStorage (mobile). No backend, auth, or external APIs.
+Web trade and journal save/read/edit flows are verified on Cloudflare Workers. Browser caches supplement server persistence. Mobile and the broader legacy feature set are not covered by this deployment verification; Flow remains disabled. Keep private configuration in ignored local environment files and Cloudflare secret bindings. Use the Node and pnpm versions pinned in the repository.
