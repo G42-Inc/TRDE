@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
+import { useUser } from '@clerk/nextjs';
 import { useParams, useRouter } from 'next/navigation';
 import { useAppData } from '@/hooks/useAppData';
+import { getTrades } from '@/lib/storage.db';
+import { loadTradeDraft } from '@/lib/trades/draft-loader';
 import { AssetClass, Direction, Grade, Session, MarketRegime, MarketHoursTag, SetupTag, NewsTag, RthEth, FuturesInstrument, OptionsUnderlying, OptionType, FUTURES_GROUPS } from '@trde/core';
 import type { Trade, FuturesTrade, OptionsTrade } from '@trde/core';
 import { ImageUpload, type ImageAttachment } from '@/components/ImageUpload';
@@ -18,12 +21,24 @@ import { calculateFuturesResults, calculateOptionsResults, editedTradeTimestamp 
 
 export default function EditTradePage() {
   const params = useParams();
+  const { user, isLoaded } = useUser();
+  const tradeId = typeof params.id === 'string' ? params.id : '';
+  if (!isLoaded || !user || !tradeId) return <SkeletonLoader width="100%" height="12rem" />;
+  // A key change unmounts the complete draft, including in-flight reads and errors.
+  return <TradeEditor key={JSON.stringify([user.id, tradeId])} accountId={user.id} tradeId={tradeId} />;
+}
+
+function TradeEditor({ accountId, tradeId }: { accountId: string; tradeId: string }) {
   const router = useRouter();
   const { showToast } = useToast();
-  const { trades, strategies, riskRules, journals, saveTrades, isLoading } = useAppData();
+  const { trades, strategies, riskRules, journals, saveTrades, isDemo, isDemoLoading } = useAppData();
   const versions: any[] = []; // Versions not yet supported in demo
-  const [mounted, setMounted] = useState(false);
-  const trade = useMemo(() => trades.find((t) => t.id === params.id) || null, [trades, params.id]);
+  const draftKey = JSON.stringify([accountId, tradeId]);
+  const [loadedDraft, setLoadedDraft] = useState<{ key: string; trade: Trade } | null>(null);
+  const [loadError, setLoadError] = useState<{ key: string; message: string } | null>(null);
+  const [reloadAttempt, setReloadAttempt] = useState(0);
+  // Hide the old snapshot immediately on an account/route change, before effects.
+  const trade = loadedDraft?.key === draftKey ? loadedDraft.trade : null;
   const [assetClass, setAssetClass] = useState<AssetClass>(AssetClass.FUTURES);
   const [formData, setFormData] = useState({
     tradeDate: '',
@@ -62,18 +77,12 @@ export default function EditTradePage() {
     setFormData((previous) => ({ ...previous, ...changes }));
   };
 
+  // Use one authenticated snapshot for this account and route. Context refreshes
+  // must not replace a user's draft or its original calculation/time baseline.
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
-    
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Initialize form data when trade is loaded
-  useEffect(() => {
-    if (trade) {
+    if (isDemoLoading || isDemo || loadedDraft) return;
+    setLoadError(null);
+    return loadTradeDraft(getTrades, tradeId, (trade) => {
       setAssetClass(trade.assetClass);
       
       const entryDate = new Date(trade.entryTime);
@@ -111,10 +120,31 @@ export default function EditTradePage() {
         entryPremium: trade.assetClass === AssetClass.OPTIONS ? (trade as OptionsTrade).entryPremium : 0,
         exitPremium: trade.assetClass === AssetClass.OPTIONS ? (trade as OptionsTrade).exitPremium : 0,
       });
-    }
-  }, [trade]);
+      // Inputs become visible only after both the snapshot and form are ready.
+      setLoadedDraft({ key: draftKey, trade });
+    }, (message) => setLoadError({ key: draftKey, message }));
+  }, [draftKey, tradeId, isDemo, isDemoLoading, reloadAttempt, loadedDraft]);
 
-  if (!mounted || !trade) {
+  if (!isDemoLoading && isDemo) {
+    return (
+      <div className="text-center py-12 space-y-4">
+        <p className="theme-text-secondary">Demo trades cannot be edited. Add your own trades with an active plan.</p>
+        <Link href="/trades" className="text-accent">Back to Trades</Link>
+      </div>
+    );
+  }
+
+  if (loadError?.key === draftKey) {
+    return (
+      <div className="text-center py-12 space-y-4">
+        <p role="alert" className="theme-text-secondary">{loadError.message}</p>
+        <button type="button" onClick={() => setReloadAttempt((attempt) => attempt + 1)} className="rounded-md bg-accent px-4 py-2 text-white">Retry</button>
+        <Link href="/trades" className="block text-accent">Back to Trades</Link>
+      </div>
+    );
+  }
+
+  if (isDemoLoading || !trade) {
     return (
       <div className="space-y-6">
         <SkeletonLoader width="200px" height="2rem" />
@@ -127,18 +157,6 @@ export default function EditTradePage() {
           </div>
           <SkeletonLoader width="200px" height="3rem" />
         </div>
-      </div>
-    );
-  }
-
-  if (!trade) {
-    return (
-      <div className="text-center py-12">
-        <p className="theme-text-secondary">Trade not found</p>
-        <Link href="/trades" className="text-accent hover:text-accent dark:hover:text-accent-light mt-2 inline-flex items-center gap-1">
-          <ArrowLeftIcon className="h-4 w-4" />
-          Back to Trades
-        </Link>
       </div>
     );
   }
@@ -227,7 +245,7 @@ export default function EditTradePage() {
       const disciplineFlags = calculateDisciplineFlags(updatedTrade, trades.filter(t => t.id !== trade.id), riskRules, hasJournal);
       updatedTrade = { ...updatedTrade, disciplineFlags };
 
-      const updatedTrades = trades.map((t) => (t.id === trade.id ? updatedTrade : t));
+      const updatedTrades = [...trades.filter((t) => t.id !== trade.id), updatedTrade];
       const result = await saveTrades(updatedTrades);
     
       // Show notification if violations were detected
@@ -257,18 +275,6 @@ export default function EditTradePage() {
         : [...previous.setupTags, tag],
     }));
   };
-
-  if (!trade) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-black/60 dark:text-white/60">Trade not found</p>
-        <Link href="/trades" className="text-accent hover:text-accent dark:hover:text-accent-light mt-2 inline-flex items-center gap-1">
-          <ArrowLeftIcon className="h-4 w-4" />
-          Back to Trades
-        </Link>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
