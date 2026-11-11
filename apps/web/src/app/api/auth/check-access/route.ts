@@ -1,13 +1,14 @@
 /**
  * Unified Access Check API Route
- * 
+ *
  * Single API endpoint for checking user access.
  * Used by client components that need to know access status.
- * 
+ *
  * This is the ONLY client-accessible way to check entitlements.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getClerkUserId } from '@/lib/auth/clerk';
 import { checkUserAccess } from '@/lib/auth/entitlements.server';
 import type { PlanTier } from '@/lib/entitlements/types';
 import { checkRateLimit, RATE_LIMITS, createRateLimitResponse } from '@/lib/utils/rate-limit';
@@ -15,12 +16,14 @@ import { apiLogger } from '@/lib/utils/logger';
 
 export async function GET(request: NextRequest) {
   try {
-    // Try to get userId from middleware header first (most reliable)
-    const userIdFromHeader = request.headers.get('x-clerk-user-id');
-    
+    const userId = await getClerkUserId();
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     // Rate limit by userId or IP
-    const rateLimitKey = userIdFromHeader || 
-      request.headers.get('x-forwarded-for')?.split(',')[0] || 
+    const rateLimitKey = userId ||
+      request.headers.get('x-forwarded-for')?.split(',')[0] ||
       'unknown';
     const rateLimit = checkRateLimit(
       `check-access:${rateLimitKey}`,
@@ -33,16 +36,16 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams;
     const planParam = searchParams.get('plan');
-    
+
     // Validate plan parameter
     const validPlans: PlanTier[] = ['basic', 'edge', 'pro'];
     const requiredPlan: PlanTier = (planParam && validPlans.includes(planParam as PlanTier))
       ? planParam as PlanTier
       : 'basic';
-    
+
     // Check access using unified function
-    const result = await checkUserAccess(userIdFromHeader || undefined, requiredPlan);
-    
+    const result = await checkUserAccess(userId || undefined, requiredPlan);
+
     return NextResponse.json({
       hasAccess: result.hasAccess,
       isAdmin: result.isAdmin,

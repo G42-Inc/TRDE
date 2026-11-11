@@ -1,6 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { ModalDialog } from '@/components/ModalDialog';
+import Link from 'next/link';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppData } from '@/hooks/useAppData';
 import { calculateAllMetrics, calculateWinRate, calculateExpectancy, calculateTotalPnLR } from '@trde/core';
 import type { Strategy as CoreStrategy, StrategyVersion, Trade } from '@trde/core';
@@ -9,18 +12,25 @@ import { createStrategy, getMyStrategies, type Strategy as SupabaseStrategy } fr
 import { StrategyShowcasePanel } from '@/components/strategies/StrategyShowcasePanel';
 import { XMarkIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
+import { useToast } from '@/contexts/ToastContext';
 import { useUser } from '@clerk/nextjs';
 
 export default function StrategiesPage() {
   const { user } = useUser();
-  const { 
-    strategies: localStrategies, 
-    trades, 
-    saveStrategies, 
-    isLoading 
+  const {
+    strategies: localStrategies,
+    trades,
+    saveStrategies,
+    versions,
+    saveVersions,
+    isLoading,
+    isDemo
   } = useAppData();
-  const versions: any[] = []; // Versions not yet supported in demo
-  const saveVersions = async (_versions: any[]) => {}; // Noop for demo
+  const { showToast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const accountRef = useRef(user?.id);
+  accountRef.current = user?.id;
   // Supabase strategies (new community system)
   const [supabaseStrategies, setSupabaseStrategies] = useState<SupabaseStrategy[]>([]);
   const [loadingStrategies, setLoadingStrategies] = useState(true);
@@ -41,94 +51,80 @@ export default function StrategiesPage() {
   });
 
   const loadSupabaseStrategies = useCallback(async () => {
-    // Load Supabase strategies
-    if (user) {
+    const userId = user?.id;
+    if (!userId) { setSupabaseStrategies([]); setLoadingStrategies(false); return; }
+    if (userId) {
       try {
         setLoadingStrategies(true);
         const result = await getMyStrategies();
-        if (result.success && result.strategies) {
+        if (accountRef.current !== userId) return;
+        if (!result.success) throw new Error(result.error || 'Could not load community strategies.');
+        if (result.strategies) {
           setSupabaseStrategies(result.strategies);
         }
       } catch (error) {
-        console.error('Error loading Supabase strategies:', error);
+        if (accountRef.current === userId) showToast('Could not load community strategies. Please refresh to retry.', 'error');
       } finally {
         setLoadingStrategies(false);
       }
     }
-  }, [user]);
+  }, [user?.id, showToast]);
 
   useEffect(() => {
+    setSupabaseStrategies([]);
     const timer = setTimeout(() => {
       setMounted(true);
       loadSupabaseStrategies();
     }, 100);
-    
+
     return () => {
       clearTimeout(timer);
     };
   }, [loadSupabaseStrategies]);
 
   const handleCreateStrategy = async () => {
-    if (!newStrategyForm.name.trim()) return;
-
-    // If creating a public strategy, use Supabase
-    if (newStrategyForm.isPublic) {
-      const result = await createStrategy({
-        title: newStrategyForm.name.trim(),
-        summary: newStrategyForm.summary.trim() || newStrategyForm.name.trim(),
-        content_md: newStrategyForm.description.trim() || '',
-        tags: [],
-        is_public: true,
-        username: user?.username || undefined,
-      });
-      
-      if (result.success) {
+    if (saving || isDemo || !newStrategyForm.name.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      if (newStrategyForm.isPublic) {
+        const result = await createStrategy({
+          title: newStrategyForm.name.trim(),
+          summary: newStrategyForm.summary.trim() || newStrategyForm.name.trim(),
+          content_md: newStrategyForm.description.trim(), tags: [], is_public: true,
+          username: user?.username || undefined,
+        });
+        if (!result.success) throw new Error(result.error || 'Could not publish strategy.');
         await loadSupabaseStrategies();
-        setShowNewStrategyModal(false);
-        setNewStrategyForm({ name: '', summary: '', description: '', isPublic: false });
       } else {
-        alert(`Failed to create strategy: ${result.error}`);
-      }
-    } else {
-      // Private strategy - use local storage (legacy) or Supabase with is_public=false
-      // For now, using Supabase for all strategies
-      const result = await createStrategy({
-        title: newStrategyForm.name.trim(),
-        summary: newStrategyForm.summary.trim() || newStrategyForm.name.trim(),
-        content_md: newStrategyForm.description.trim() || '',
-        tags: [],
-        is_public: false,
-        username: user?.username || undefined,
-      });
-      
-      if (result.success) {
-        await loadSupabaseStrategies();
-        setShowNewStrategyModal(false);
-        setNewStrategyForm({ name: '', summary: '', description: '', isPublic: false });
-      } else {
-        // Fallback to local storage if Supabase fails
-        const newStrategy: CoreStrategy = {
-          id: `strategy-${Date.now()}`,
-          name: newStrategyForm.name.trim(),
-          description: newStrategyForm.description.trim() || undefined,
+        const strategy: CoreStrategy = {
+          id: `strategy-${crypto.randomUUID()}`, name: newStrategyForm.name.trim(),
+          description: newStrategyForm.description.trim() || newStrategyForm.summary.trim() || undefined,
           createdAt: Date.now(),
         };
-        const updated = [...localStrategies, newStrategy];
-        await saveStrategies(updated);
-        setShowNewStrategyModal(false);
-        setNewStrategyForm({ name: '', summary: '', description: '', isPublic: false });
+        await saveStrategies([...localStrategies, strategy]);
       }
-    }
+      setShowNewStrategyModal(false);
+      setNewStrategyForm({ name: '', summary: '', description: '', isPublic: false });
+      showToast('Strategy saved.', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save strategy.';
+      setSaveError(message);
+      showToast(message, 'error');
+    } finally { setSaving(false); }
   };
 
   const handleCreateVersion = async () => {
-    if (!selectedStrategyId || !newVersionForm.definition.trim()) return;
+    if (saving || isDemo || !selectedStrategyId || !newVersionForm.definition.trim()) return;
 
+    setSaving(true);
+    setSaveError(null);
+    try {
     const strategyVersions = versions.filter((v) => v.strategyId === selectedStrategyId);
     const nextVersion = `v${strategyVersions.length + 1}`;
 
     const newVersion: StrategyVersion = {
-      id: `version-${Date.now()}`,
+      id: `version-${crypto.randomUUID()}`,
       strategyId: selectedStrategyId,
       version: nextVersion,
       definition: newVersionForm.definition.trim(),
@@ -140,12 +136,18 @@ export default function StrategiesPage() {
     await saveVersions(updated);
     setShowCreateVersionModal(false);
     setNewVersionForm({ definition: '', triggers: '' });
+    showToast('Version saved.', 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save version.';
+      setSaveError(message);
+      showToast(message, 'error');
+    } finally { setSaving(false); }
   };
 
   if (!mounted) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <SkeletonLoader width="150px" height="2rem" className="mb-2" />
             <SkeletonLoader width="300px" height="1rem" />
@@ -173,7 +175,7 @@ export default function StrategiesPage() {
     const winRate = calculateWinRate(strategyTrades);
     const expectancy = calculateExpectancy(strategyTrades);
     const metrics = calculateAllMetrics(strategyTrades);
-    
+
     return {
       strategy,
       type: 'local' as const,
@@ -232,7 +234,8 @@ export default function StrategiesPage() {
     <div className="lg:grid grid-cols-3 gap-8 animate-fade-in">
       {/* Left Column: My Strategies */}
       <div className="col-span-2 space-y-8">
-        <div className="flex items-center justify-between">
+        {isDemo && <p className="rounded-lg theme-bg-secondary p-3 text-sm theme-text-secondary">Demo strategies are read-only. <Link href="/pricing" className="underline">Choose a plan</Link> to save your own playbooks.</p>}
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-4">
             <div
               className="p-3 rounded-2xl flex items-center justify-center"
@@ -253,8 +256,8 @@ export default function StrategiesPage() {
               <p className="theme-text-secondary mt-1">Analyze and refine your trading playbooks</p>
             </div>
           </div>
-          <button 
-            onClick={() => setShowNewStrategyModal(true)}
+          <button
+            disabled={isDemo} onClick={() => { setSaveError(null); setShowNewStrategyModal(true); }}
             className="px-6 py-3 rounded-xl font-bold theme-text transition-all duration-300 hover:scale-105 active:scale-95"
             style={{
               background: 'rgba(255,255,255,0.10)',
@@ -275,10 +278,12 @@ export default function StrategiesPage() {
             const downvotes = type === 'supabase' ? strategyData.downvotes : 0;
             const winRateColor = winRate >= 50 ? 'from-green-400 to-emerald-500' : 'from-orange-400 to-amber-500';
             const isPublicBadge = type === 'supabase' && isPublic;
-            
+
             return (
-              <div 
+              <div
                 key={`${type}-${strategy.id}`}
+                role="button" tabIndex={0} aria-label={`View ${strategy.name}`}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click(); } }}
                 onClick={() => {
                   // Open modal for all strategies
                   setSelectedStrategyId(strategy.id);
@@ -289,7 +294,7 @@ export default function StrategiesPage() {
               >
                 {/* Gradient background on hover */}
                 <div className="absolute inset-0 opacity-0 group-hover:opacity-[0.03] dark:group-hover:opacity-[0.06] transition-all duration-500 bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-500" />
-                
+
                 <div className="relative z-10">
                   <div className="flex items-start justify-between mb-5">
                     <div className="flex-1">
@@ -334,7 +339,7 @@ export default function StrategiesPage() {
                           <span className="text-sm font-bold theme-text">{winRate.toFixed(1)}%</span>
                         </div>
                         <div className="relative w-full h-3 theme-bg-tertiary rounded-full overflow-hidden">
-                          <div 
+                          <div
                             className={`h-full bg-gradient-to-r ${winRateColor} transition-all duration-700 shadow-md relative overflow-hidden`}
                             style={{ width: `${Math.min(winRate, 100)}%` }}
                           >
@@ -407,13 +412,13 @@ export default function StrategiesPage() {
                     </div>
                   )}
                 </div>
-                
+
                 {/* Hover shadow effect */}
                 <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none" style={{ boxShadow: 'var(--shadow-lg)' }} />
               </div>
             );
           })}
-          
+
           {allStrategies.length === 0 && !loadingStrategies && (
             <div className="col-span-full text-center py-16 theme-bg-secondary rounded-2xl border theme-border">
               <div className="max-w-md mx-auto">
@@ -424,7 +429,7 @@ export default function StrategiesPage() {
                 </div>
                 <p className="theme-text-secondary text-lg mb-6">No strategies yet. Create your first strategy to get started.</p>
                 <button
-                  onClick={() => setShowNewStrategyModal(true)}
+                  disabled={isDemo} onClick={() => { setSaveError(null); setShowNewStrategyModal(true); }}
                   className="px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-bold shadow-lg transition-all duration-300 hover:scale-105"
                 >
                   Create First Strategy
@@ -442,19 +447,18 @@ export default function StrategiesPage() {
 
       {/* Create Version Modal - Enhanced */}
       {showCreateVersionModal && selectedStrategyId && (
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[200] p-4 animate-fade-in"
-          onClick={() => setShowCreateVersionModal(false)}
-        >
+        <ModalDialog isOpen onClose={() => setShowCreateVersionModal(false)} labelledBy="strategy-dialog-1" className="items-center justify-center">
           <div
-            className="theme-bg-secondary rounded-2xl max-w-2xl w-full border theme-border animate-scale-in"
+            className="theme-bg-secondary rounded-2xl max-w-2xl w-full border theme-border animate-scale-in max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ boxShadow: 'var(--shadow-2xl)' }}
           >
+            {saveError && <p role="alert" className="m-4 rounded-lg border border-red-500/40 bg-red-950 p-3 text-sm text-red-100">{saveError}</p>}
+            {isDemo && <p className="m-4 text-sm theme-text-secondary">Demo data is read-only. <Link href="/pricing" className="underline">Choose a plan</Link> to save your own work.</p>}
             <div className="p-6 border-b theme-border">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold theme-text">Create New Version</h2>
-                <button
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id="strategy-dialog-1" className="text-2xl font-bold theme-text">Create New Version</h2>
+                <button aria-label="Close dialog"
                   onClick={() => setShowCreateVersionModal(false)}
                   className="theme-text-secondary hover:theme-text transition-all duration-200 hover:scale-110 active:scale-95 p-2 rounded-full hover:bg-danger/10"
                 >
@@ -464,12 +468,12 @@ export default function StrategiesPage() {
             </div>
             <div className="p-6 space-y-5">
               <div>
-                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
+                <label htmlFor="strategy-field-1" className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
                   Definition *
                 </label>
-                <textarea
+                <textarea id="strategy-field-1"
                   value={newVersionForm.definition}
-                  onChange={(e) => setNewVersionForm({ ...newVersionForm, definition: e.target.value })}
+                  onChange={(e) => setNewVersionForm((previous) => ({ ...previous, definition: e.target.value }))}
                   className="w-full theme-bg-tertiary border theme-border theme-text rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all duration-200"
                   rows={6}
                   placeholder="Define the strategy rules, entry criteria, and management approach..."
@@ -477,12 +481,12 @@ export default function StrategiesPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
+                <label htmlFor="strategy-field-2" className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
                   Triggers
                 </label>
-                <textarea
+                <textarea id="strategy-field-2"
                   value={newVersionForm.triggers}
-                  onChange={(e) => setNewVersionForm({ ...newVersionForm, triggers: e.target.value })}
+                  onChange={(e) => setNewVersionForm((previous) => ({ ...previous, triggers: e.target.value }))}
                   className="w-full theme-bg-tertiary border theme-border theme-text rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all duration-200"
                   rows={4}
                   placeholder="Entry triggers, exit conditions, and specific setup requirements..."
@@ -491,7 +495,7 @@ export default function StrategiesPage() {
               <div className="flex space-x-4 pt-4">
                 <button
                   onClick={handleCreateVersion}
-                  disabled={!newVersionForm.definition.trim()}
+                  disabled={saving || isDemo || !newVersionForm.definition.trim()}
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-bold transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                 >
                   Create Version
@@ -508,24 +512,23 @@ export default function StrategiesPage() {
               </div>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
 
       {/* New Strategy Modal - Enhanced */}
       {showNewStrategyModal && (
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[200] p-4 animate-fade-in"
-          onClick={() => setShowNewStrategyModal(false)}
-        >
+        <ModalDialog isOpen onClose={() => setShowNewStrategyModal(false)} labelledBy="strategy-dialog-2" className="items-center justify-center">
           <div
-            className="theme-bg-secondary rounded-2xl max-w-lg w-full border theme-border animate-scale-in"
+            className="theme-bg-secondary rounded-2xl max-w-lg w-full border theme-border animate-scale-in max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{ boxShadow: 'var(--shadow-2xl)' }}
           >
+            {saveError && <p role="alert" className="m-4 rounded-lg border border-red-500/40 bg-red-950 p-3 text-sm text-red-100">{saveError}</p>}
+            {isDemo && <p className="m-4 text-sm theme-text-secondary">Demo data is read-only. <Link href="/pricing" className="underline">Choose a plan</Link> to save your own work.</p>}
             <div className="p-6 border-b theme-border">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold theme-text">New Strategy</h2>
-                <button
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id="strategy-dialog-2" className="text-2xl font-bold theme-text">New Strategy</h2>
+                <button aria-label="Close dialog"
                   onClick={() => setShowNewStrategyModal(false)}
                   className="theme-text-secondary hover:theme-text transition-all duration-200 hover:scale-110 active:scale-95 p-2 rounded-full hover:bg-danger/10"
                 >
@@ -535,37 +538,37 @@ export default function StrategiesPage() {
             </div>
             <div className="p-6 space-y-5">
               <div>
-                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
+                <label htmlFor="strategy-field-3" className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
                   Strategy Name *
                 </label>
-                <input
+                <input id="strategy-field-3"
                   type="text"
                   value={newStrategyForm.name}
-                  onChange={(e) => setNewStrategyForm({ ...newStrategyForm, name: e.target.value })}
+                  onChange={(e) => setNewStrategyForm((previous) => ({ ...previous, name: e.target.value }))}
                   className="w-full theme-bg-tertiary border theme-border theme-text rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                   placeholder="e.g., ORB Breakout"
                   autoFocus
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
+                <label htmlFor="strategy-field-4" className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
                   Summary
                 </label>
-                <input
+                <input id="strategy-field-4"
                   type="text"
                   value={newStrategyForm.summary}
-                  onChange={(e) => setNewStrategyForm({ ...newStrategyForm, summary: e.target.value })}
+                  onChange={(e) => setNewStrategyForm((previous) => ({ ...previous, summary: e.target.value }))}
                   className="w-full theme-bg-tertiary border theme-border theme-text rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                   placeholder="Brief summary (for public strategies)"
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
+                <label htmlFor="strategy-field-5" className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">
                   Description
                 </label>
-                <textarea
+                <textarea id="strategy-field-5"
                   value={newStrategyForm.description}
-                  onChange={(e) => setNewStrategyForm({ ...newStrategyForm, description: e.target.value })}
+                  onChange={(e) => setNewStrategyForm((previous) => ({ ...previous, description: e.target.value }))}
                   className="w-full theme-bg-tertiary border theme-border theme-text rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all duration-200"
                   rows={3}
                   placeholder="Detailed description of the strategy..."
@@ -579,10 +582,10 @@ export default function StrategiesPage() {
                   </div>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
-                  <input
+                  <input aria-label="Make this strategy public"
                     type="checkbox"
                     checked={newStrategyForm.isPublic}
-                    onChange={(e) => setNewStrategyForm({ ...newStrategyForm, isPublic: e.target.checked })}
+                    onChange={(e) => setNewStrategyForm((previous) => ({ ...previous, isPublic: e.target.checked }))}
                     className="sr-only peer"
                   />
                   <div className="w-12 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
@@ -591,7 +594,7 @@ export default function StrategiesPage() {
               <div className="flex space-x-4 pt-4">
                 <button
                   onClick={handleCreateStrategy}
-                  disabled={!newStrategyForm.name.trim()}
+                  disabled={saving || isDemo || !newStrategyForm.name.trim()}
                   className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 font-bold transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                 >
                   Create Strategy
@@ -605,20 +608,17 @@ export default function StrategiesPage() {
               </div>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
 
       {/* Strategy Detail Modal */}
       {selectedStrategy && (
-        <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-[200] p-4 animate-fade-in"
-          onClick={() => {
+        <ModalDialog isOpen onClose={() => {
             setSelectedStrategyId(null);
             setSelectedStrategyType(null);
-          }}
-        >
+          }} labelledBy="strategy-dialog-3" className="items-center justify-center">
           <div
-            className="rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-scale-in custom-scrollbar"
+            className="rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto animate-scale-in custom-scrollbar max-h-[calc(100dvh-2rem)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
             style={{
               background: 'rgba(255,255,255,0.06)',
@@ -628,16 +628,18 @@ export default function StrategiesPage() {
               boxShadow: '0 24px 48px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
             }}
           >
+            {saveError && <p role="alert" className="m-4 rounded-lg border border-red-500/40 bg-red-950 p-3 text-sm text-red-100">{saveError}</p>}
+            {isDemo && <p className="m-4 text-sm theme-text-secondary">Demo data is read-only. <Link href="/pricing" className="underline">Choose a plan</Link> to save your own work.</p>}
             {/* Modal Header */}
             <div className="sticky top-0 p-6 z-10" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)' }}>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-bold theme-text">{selectedStrategy.strategy.name}</h2>
+                  <h2 id="strategy-dialog-3" className="text-2xl font-bold theme-text">{selectedStrategy.strategy.name}</h2>
                   {selectedStrategy.strategy.description && (
                     <p className="theme-text-secondary text-sm mt-1">{selectedStrategy.strategy.description}</p>
                   )}
                 </div>
-                <button
+                <button aria-label="Close dialog"
                   onClick={() => {
                     setSelectedStrategyId(null);
                     setSelectedStrategyType(null);
@@ -747,8 +749,8 @@ export default function StrategiesPage() {
                             <td className="py-2 px-3 theme-text">{new Date(trade.tradeDate).toLocaleDateString()}</td>
                             <td className="py-2 px-3">
                               <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                                trade.outcome === Outcome.WIN 
-                                  ? 'bg-positive/20 text-positive' 
+                                trade.outcome === Outcome.WIN
+                                  ? 'bg-positive/20 text-positive'
                                   : 'bg-negative/20 text-negative'
                               }`}>
                                 {trade.outcome}
@@ -774,7 +776,7 @@ export default function StrategiesPage() {
               )}
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
     </div>
   );
@@ -801,7 +803,7 @@ function StrategyDetailView({
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}

@@ -1,3 +1,4 @@
+import { readEdgeJson, writeEdgeStorage, removeEdgeStorage, getEdgeAccountScope, type EdgeAccountScope } from './accountScope';
 // Local persistence for EDGE synced data
 
 import type { RoundTripTrade, NormalizedExecution, ProjectXContract } from '../types';
@@ -12,52 +13,49 @@ const STORAGE_KEYS = {
 /**
  * Save round-trip trades to localStorage
  */
-export function saveTrades(trades: RoundTripTrade[]): void {
+export function saveTrades(trades: RoundTripTrade[], scope: EdgeAccountScope | null = getEdgeAccountScope()): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.TRADES, JSON.stringify(trades));
+  writeEdgeStorage(STORAGE_KEYS.TRADES, JSON.stringify(trades), scope);
 }
 
 /**
  * Get round-trip trades from localStorage
  */
-export function getTrades(): RoundTripTrade[] {
+export function getTrades(scope: EdgeAccountScope | null = getEdgeAccountScope()): RoundTripTrade[] {
   if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(STORAGE_KEYS.TRADES);
-  return data ? JSON.parse(data) : [];
+  return readEdgeJson(STORAGE_KEYS.TRADES, [], scope);
 }
 
 /**
  * Save executions to localStorage
  */
-export function saveExecutions(executions: NormalizedExecution[]): void {
+export function saveExecutions(executions: NormalizedExecution[], scope: EdgeAccountScope | null = getEdgeAccountScope()): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.EXECUTIONS, JSON.stringify(executions));
+  writeEdgeStorage(STORAGE_KEYS.EXECUTIONS, JSON.stringify(executions), scope);
 }
 
 /**
  * Get executions from localStorage
  */
-export function getExecutions(): NormalizedExecution[] {
+export function getExecutions(scope: EdgeAccountScope | null = getEdgeAccountScope()): NormalizedExecution[] {
   if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(STORAGE_KEYS.EXECUTIONS);
-  return data ? JSON.parse(data) : [];
+  return readEdgeJson(STORAGE_KEYS.EXECUTIONS, [], scope);
 }
 
 /**
  * Save contracts to localStorage
  */
-export function saveContracts(contracts: ProjectXContract[]): void {
+export function saveContracts(contracts: ProjectXContract[], scope: EdgeAccountScope | null = getEdgeAccountScope()): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.CONTRACTS, JSON.stringify(contracts));
+  writeEdgeStorage(STORAGE_KEYS.CONTRACTS, JSON.stringify(contracts), scope);
 }
 
 /**
  * Get contracts from localStorage
  */
-export function getContracts(): ProjectXContract[] {
+export function getContracts(scope: EdgeAccountScope | null = getEdgeAccountScope()): ProjectXContract[] {
   if (typeof window === 'undefined') return [];
-  const data = localStorage.getItem(STORAGE_KEYS.CONTRACTS);
-  return data ? JSON.parse(data) : [];
+  return readEdgeJson(STORAGE_KEYS.CONTRACTS, [], scope);
 }
 
 /**
@@ -68,31 +66,30 @@ export function saveSyncState(state: {
   totalExecutions: number;
   totalTrades: number;
   dateRange?: { start: string; end: string };
-}): void {
+}, scope: EdgeAccountScope | null = getEdgeAccountScope()): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.SYNC_STATE, JSON.stringify(state));
+  writeEdgeStorage(STORAGE_KEYS.SYNC_STATE, JSON.stringify(state), scope);
 }
 
 /**
  * Get sync state
  */
-export function getSyncState(): {
+export function getSyncState(scope: EdgeAccountScope | null = getEdgeAccountScope()): {
   lastSyncTime?: string;
   totalExecutions: number;
   totalTrades: number;
   dateRange?: { start: string; end: string };
 } | null {
   if (typeof window === 'undefined') return null;
-  const data = localStorage.getItem(STORAGE_KEYS.SYNC_STATE);
-  return data ? JSON.parse(data) : null;
+  return readEdgeJson(STORAGE_KEYS.SYNC_STATE, null, scope);
 }
 
 /**
  * Clear all EDGE data
  */
-export function clearEdgeData(): void {
+export function clearEdgeData(scope: EdgeAccountScope | null = getEdgeAccountScope()): void {
   if (typeof window === 'undefined') return;
   Object.values(STORAGE_KEYS).forEach((key) => {
-    localStorage.removeItem(key);
+    removeEdgeStorage(key, scope);
   });
 }

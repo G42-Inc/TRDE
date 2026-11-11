@@ -1,3 +1,13 @@
+# Current deployment schema
+
+For a **new, empty, dedicated TRDE project**, use [`bootstrap.sql`](bootstrap.sql) as one migration named `trde_server_only_baseline`, then apply [`patches/precise-instrument-prices.sql`](patches/precise-instrument-prices.sql) as `trde_precise_instrument_prices`. Do not run the overlapping historical setup and repair scripts below in sequence. The bootstrap refuses any nonempty public schema; an existing installation needs a separately reviewed migration.
+
+The canonical bootstrap separates private `user_strategies` from community `strategies`, includes the JSONB journal columns used by the current API, and enables RLS on all 34 tables. Browser `anon`/`authenticated` roles have no table, view or function access. The Worker verifies Clerk identity and uses a secret service-role client, with ownership filtering and immutable `user_id` database triggers. Keep the service-role key only in server secret storage. No user, admin or entitlement records are seeded; only 46 product achievement definitions are inserted.
+
+On November 8, 2026, the dedicated TRDE project passed service-role create/read/edit SQL checks, JSONB journal roundtrips, ownership-change rejection, and XP/streak RPC checks inside a transaction that was rolled back. The Supabase security advisor returned no findings. This verifies the database layer; authenticated browser/Worker tests are a separate deployment requirement.
+
+## Historical setup reference
+
 # Supabase Database Setup
 
 This directory contains the database schema and migration scripts for the TRDE application.

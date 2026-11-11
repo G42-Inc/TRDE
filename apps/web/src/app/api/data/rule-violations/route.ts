@@ -1,3 +1,5 @@
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
+import { saveOwnedRecords, RecordConflictError, InvalidRecordError } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -9,8 +11,7 @@ import type { RuleViolation } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -62,8 +63,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -71,6 +71,10 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const demo = await checkDemoStatus(userId);
+    if (demo.error) return NextResponse.json({ error: 'Could not verify journal access. Please retry.' }, { status: 503 });
+    if (demo.isDemo) return createDemoBlockedResponse('saving journal data');
 
     const body = await request.json();
     const { ruleViolations } = body;
@@ -115,22 +119,13 @@ export async function POST(request: NextRequest) {
       metadata: {},
     }));
 
-    const { error } = await supabase
-      .from('rule_violations')
-      .upsert(dbViolations, {
-        onConflict: 'id',
-      });
-
-    if (error) {
-      console.error('Error saving rule violations:', error);
-      return NextResponse.json(
-        { error: 'Failed to save rule violations' },
-        { status: 500 }
-      );
-    }
+    await saveOwnedRecords(supabase, 'rule_violations', userId, dbViolations);
 
     return NextResponse.json({ success: true, count: ruleViolations.length });
   } catch (error: any) {
+    if (error instanceof RecordConflictError || error instanceof InvalidRecordError) {
+      return NextResponse.json({ error: error.message }, { status: error instanceof RecordConflictError ? 409 : 400 });
+    }
     console.error('Error in POST /api/data/rule-violations:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },

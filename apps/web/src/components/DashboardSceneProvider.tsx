@@ -311,8 +311,8 @@ export function DashboardSceneProvider({ children }: Props) {
               position: 'absolute',
               inset: 0,
               background: dark
-                ? `rgba(0, 0, 0, ${currentScene.overlayOpacity})`
-                : `rgba(255, 255, 255, ${currentScene.overlayOpacity})`,
+                ? `rgba(7, 12, 22, ${Math.max(currentScene.overlayOpacity, 0.64)})`
+                : `rgba(255, 255, 255, ${Math.max(currentScene.overlayOpacity, 0.60)})`,
             }}
           />
         </div>

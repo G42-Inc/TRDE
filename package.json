@@ -7,10 +7,16 @@
     "dev:mobile": "pnpm --filter mobile start",
     "build:web": "pnpm --filter web build",
     "build:mobile": "pnpm --filter mobile build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test:web": "pnpm --filter web test",
+    "build:worker": "pnpm --filter web build:worker",
+    "deploy:web": "pnpm --filter web deploy"
   },
   "devDependencies": {
     "typescript": "^5.3.3"
   },
-  "packageManager": "pnpm@8.15.0"
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=22.0.0 <25"
+  }
 }

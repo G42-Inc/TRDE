@@ -1,3 +1,4 @@
+import { getClerkUserId } from '@/lib/auth/clerk';
 import { NextRequest, NextResponse } from 'next/server';
 import { clerkClient } from '@clerk/nextjs/server';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -11,8 +12,8 @@ import { isAllowedAdminEmail } from '@/lib/env.server';
  */
 export async function POST(request: NextRequest) {
   try {
-    // Get userId from headers (set by middleware) - DO NOT use currentUser() in API routes
-    const userId = request.headers.get('x-clerk-user-id');
+
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json({ error: 'Not authenticated - no user ID in request' }, { status: 401 });
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
     // Fetch user from Clerk to get email for authorization check
     let user;
     try {
-      user = await clerkClient.users.getUser(userId);
+      user = await (await clerkClient()).users.getUser(userId);
     } catch (error) {
       console.error('Failed to fetch user from Clerk:', error);
       return NextResponse.json({ error: 'Failed to fetch user information' }, { status: 500 });
@@ -32,7 +33,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Only allow setup for authorized admin emails
-    const userEmail = user.emailAddresses[0]?.emailAddress;
+    const primaryEmail = user.emailAddresses.find(email => email.id === user.primaryEmailAddressId);
+    const userEmail = primaryEmail?.verification?.status === 'verified' ? primaryEmail.emailAddress : undefined;
     
     if (!isAllowedAdminEmail(userEmail)) {
       return NextResponse.json(

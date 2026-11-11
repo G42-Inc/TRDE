@@ -7,106 +7,19 @@ import { hasPlanAccess } from './types';
  * Returns null if no entitlement found
  */
 export async function getUserEntitlement(userId: string): Promise<Entitlement | null> {
-  try {
-    console.log('getUserEntitlement: Starting fetch for user:', userId);
-    console.log('getUserEntitlement: userId type:', typeof userId, 'length:', userId?.length);
-    console.log('getUserEntitlement: userId value:', JSON.stringify(userId));
-    
-    const supabase = getSupabaseServiceClient();
-    console.log('getUserEntitlement: Supabase client created');
-    
-    // First, let's check if the table exists and has any data
-    const { data: allData, error: countError } = await supabase
-      .from('entitlements')
-      .select('user_id')
-      .limit(5);
-    
-    console.log('getUserEntitlement: Sample entitlements in DB:', {
-      count: allData?.length || 0,
-      userIds: allData?.map(e => e.user_id) || [],
-      error: countError,
-    });
-    
-    // Now query for the specific user
-    // Log the exact query we're about to run
-    console.log('getUserEntitlement: About to query with:', {
-      table: 'entitlements',
-      column: 'user_id',
-      value: userId,
-      valueType: typeof userId,
-      valueLength: userId?.length,
-      valueJSON: JSON.stringify(userId),
-      valueBytes: Buffer.from(userId || '').toString('hex'),
-    });
-    
-    const { data, error } = await supabase
-      .from('entitlements')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle(); // Use maybeSingle() instead of single() - returns null if no rows instead of error
+  const supabase = getSupabaseServiceClient();
+  const { data, error } = await supabase
+    .from('entitlements')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
 
-    console.log('getUserEntitlement: Query result:', {
-      hasData: !!data,
-      hasError: !!error,
-      error: error ? {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      } : null,
-      searchedUserId: userId,
-      searchedUserIdJSON: JSON.stringify(userId),
-      foundUserId: data?.user_id,
-      foundUserIdJSON: data?.user_id ? JSON.stringify(data.user_id) : null,
-      userIdsMatch: data?.user_id === userId,
-      userIdsMatchStrict: data?.user_id === userId,
-      searchedLength: userId?.length,
-      foundLength: data?.user_id?.length,
-      // Character-by-character comparison
-      charComparison: userId && data?.user_id ? {
-        sameLength: userId.length === data.user_id.length,
-        firstChar: { searched: userId[0], found: data.user_id[0], match: userId[0] === data.user_id[0] },
-        lastChar: { searched: userId[userId.length - 1], found: data.user_id[data.user_id.length - 1], match: userId[userId.length - 1] === data.user_id[data.user_id.length - 1] },
-      } : null,
-    });
-
-    if (error) {
-      console.error('getUserEntitlement: Supabase query error:', error);
-      console.error('getUserEntitlement: Error details:', {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-      });
-      console.error('getUserEntitlement: User ID:', userId);
-      return null;
-    }
-
-    if (!data) {
-      console.log('getUserEntitlement: No entitlement found for user:', userId);
-      console.log('getUserEntitlement: This means the query returned no rows - userId may not exist in database');
-      return null;
-    }
-
-    console.log('getUserEntitlement: Found entitlement for user:', userId, {
-      plan: data.plan,
-      status: data.status,
-      override_enabled: data.override_enabled,
-      override_expires_at: data.override_expires_at,
-      current_period_end: data.current_period_end,
-      userId: data.user_id, // Log to verify match
-    });
-
-    return data as Entitlement;
-  } catch (error: any) {
-    console.error('getUserEntitlement: Exception caught:', error);
-    console.error('getUserEntitlement: Exception details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-    });
-    throw error; // Re-throw to be caught by the API route
+  if (error) {
+    console.error('getUserEntitlement: entitlement lookup failed');
+    return null;
   }
+
+  return data as Entitlement | null;
 }
 
 /**

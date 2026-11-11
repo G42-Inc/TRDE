@@ -1,31 +1,39 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { addDays, format } from 'date-fns';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { readEdgeStorage, removeEdgeStorage } from '@/lib/edge/store/accountScope';
 import { useAppData } from '@/hooks/useAppData';
-import { AssetClass, Direction, Grade, Outcome, Session, MarketRegime, MarketHoursTag, SetupTag, NewsTag, RthEth, FuturesInstrument, OptionsUnderlying, OptionType, FUTURES_GROUPS } from '@trde/core';
+import { AssetClass, Direction, Grade, Session, MarketRegime, MarketHoursTag, SetupTag, NewsTag, RthEth, FuturesInstrument, OptionsUnderlying, OptionType, FUTURES_GROUPS } from '@trde/core';
 import type { Trade, FuturesTrade, OptionsTrade } from '@trde/core';
 import { ImageUpload, type ImageAttachment } from '@/components/ImageUpload';
 import { useToast } from '@/contexts/ToastContext';
 import { getViolationRuleName } from '@/lib/violations';
 import { calculateDisciplineFlags } from '@/lib/discipline-flags';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
+import { FuturesTickFields } from '@/components/FuturesTickFields';
+import { calculateFuturesResults, calculateOptionsResults, type FuturesCalculationReference } from '@/lib/trades/calculations';
 
 export default function NewTradePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { showToast } = useToast();
-  const { trades, strategies, riskRules, saveTrades, isLoading } = useAppData();
-  const versions: any[] = []; // Versions not yet supported in demo
+  const { trades, strategies, versions, riskRules, saveTrades, isLoading } = useAppData();
   const [mounted, setMounted] = useState(false);
+  const [importedFutures, setImportedFutures] = useState<FuturesCalculationReference>();
   const [assetClass, setAssetClass] = useState<AssetClass>(AssetClass.FUTURES);
   const [formData, setFormData] = useState({
-    tradeDate: new Date().toISOString().split('T')[0],
+    tradeDate: format(new Date(), 'yyyy-MM-dd'),
     entryTime: '09:30',
     exitTime: '10:30',
     direction: Direction.LONG,
     quantity: 1,
     plannedRiskUsd: 100,
+    feesUsd: 10,
+    tickSize: undefined as number | undefined,
+    tickValueUsd: undefined as number | undefined,
+    contractMultiplier: 100,
     grade: Grade.B,
     strategyId: '',
     strategyVersionId: '',
@@ -43,22 +51,20 @@ export default function NewTradePage() {
     underlying: OptionsUnderlying.SPY,
     strike: 400,
     optionType: OptionType.CALL,
-    expiration: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    expiration: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
     entryPremium: 5,
     exitPremium: 6,
-    // Imported data (optional)
-    importedResultUsd: undefined as number | undefined,
-    importedFeesUsd: undefined as number | undefined,
-    importedOutcome: undefined as Outcome | undefined,
   });
 
+  const [saving, setSaving] = useState(false);
+  const [readingImages, setReadingImages] = useState(false);
+
+  const updateFormData = (changes: Partial<typeof formData>) => {
+    setFormData((previous) => ({ ...previous, ...changes }));
+  };
+
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
-    
-    return () => clearTimeout(timer);
+    setMounted(true);
   }, []);
 
   // Check for imported trade data from EDGE or date from calendar
@@ -75,7 +81,7 @@ export default function NewTradePage() {
     // Check for imported trade data from EDGE
     const importParam = searchParams.get('import');
     if (importParam === 'edge') {
-      const importedData = localStorage.getItem('trde:importTrade');
+      const importedData = readEdgeStorage('edge:importTrade');
       if (importedData) {
         try {
           const data = JSON.parse(importedData);
@@ -85,20 +91,30 @@ export default function NewTradePage() {
             entryTime: data.entryTime || prev.entryTime,
             exitTime: data.exitTime || prev.exitTime,
             direction: data.direction || prev.direction,
-            quantity: data.quantity || prev.quantity,
-            entryPrice: data.entryPrice || prev.entryPrice,
-            exitPrice: data.exitPrice || prev.exitPrice,
+            quantity: data.quantity ?? prev.quantity,
+            entryPrice: data.entryPrice ?? prev.entryPrice,
+            exitPrice: data.exitPrice ?? prev.exitPrice,
             notes: data.notes || prev.notes,
             instrumentRoot: data.instrumentRoot || prev.instrumentRoot,
-            importedResultUsd: data.resultUsd,
-            importedFeesUsd: data.feesUsd,
-            importedOutcome: data.outcome,
+            feesUsd: data.feesUsd ?? prev.feesUsd,
+            tickSize: data.tickSize,
+            tickValueUsd: data.tickValueUsd,
           }));
+          if (Number.isFinite(data.resultUsd)) {
+            setImportedFutures({
+              instrumentRoot: data.instrumentRoot, direction: data.direction, quantity: data.quantity,
+              entryPrice: data.entryPrice, exitPrice: data.exitPrice, feesUsd: data.feesUsd ?? 10,
+              plannedRiskUsd: 100, resultUsd: data.resultUsd, outcome: data.outcome,
+              tickSize: data.tickSize, tickValueUsd: data.tickValueUsd,
+              pointsPnL: data.pointsPnL, ticksPnL: data.ticksPnL,
+            });
+          }
           // Clear the imported data after using it
-          localStorage.removeItem('trde:importTrade');
+          removeEdgeStorage('edge:importTrade');
           showToast('Trade data imported from EDGE. Please review and complete the form.', 'info');
         } catch (error) {
-          console.error('Failed to parse imported trade data:', error);
+          removeEdgeStorage('edge:importTrade');
+          showToast('The staged EDGE trade could not be loaded. Import it again.', 'error');
         }
       }
     }
@@ -115,7 +131,7 @@ export default function NewTradePage() {
         <div className="theme-bg-secondary p-6 rounded-xl border theme-border space-y-6">
           <SkeletonLoader width="150px" height="1.5rem" />
           <SkeletonLoader width="100%" height="1rem" lines={12} />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <SkeletonLoader width="100%" height="3rem" />
             <SkeletonLoader width="100%" height="3rem" />
           </div>
@@ -127,169 +143,143 @@ export default function NewTradePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving || readingImages) return;
     const now = Date.now();
     const entryTime = new Date(`${formData.tradeDate}T${formData.entryTime}:00`).getTime();
     const exitTime = new Date(`${formData.tradeDate}T${formData.exitTime}:00`).getTime();
 
-    let newTrade: Trade;
+    setSaving(true);
+    try {
+      let newTrade: Trade;
 
-    if (assetClass === AssetClass.FUTURES) {
-      // Calculate pointsPnL from prices
-      const pointsPnL = formData.direction === Direction.LONG
-        ? (formData.exitPrice - formData.entryPrice) * formData.quantity
-        : (formData.entryPrice - formData.exitPrice) * formData.quantity;
+      if (assetClass === AssetClass.FUTURES) {
+        const financials = calculateFuturesResults(formData, importedFutures);
+
+        // Calculate discipline flags first
+        const tempTrade = {
+          id: `trade-${now}`,
+          assetClass: AssetClass.FUTURES,
+          createdAt: now,
+          updatedAt: now,
+          tradeDate: formData.tradeDate,
+          entryTime,
+          exitTime,
+          direction: formData.direction,
+          quantity: formData.quantity,
+          feesUsd: formData.feesUsd,
+          plannedRiskUsd: formData.plannedRiskUsd,
+          ...financials,
+          grade: formData.grade,
+          strategyId: formData.strategyId,
+          strategyVersionId: formData.strategyVersionId,
+          setupTags: formData.setupTags,
+          session: formData.session,
+          marketHoursTag: formData.marketHoursTag,
+          marketRegime: formData.marketRegime,
+          newsTags: [NewsTag.NONE],
+          mistakes: [],
+          notes: formData.notes,
+          attachments: formData.attachments,
+          reviewFlag: false,
+          collections: [],
+          instrumentRoot: formData.instrumentRoot,
+          entryPrice: formData.entryPrice,
+          exitPrice: formData.exitPrice,
+          rthEth: RthEth.RTH,
+          disciplineFlags: {
+            respectedDailyLossLimit: true,
+            respectedMaxTrades: true,
+            respectedMaxContracts: true,
+            hadStopDefined: true,
+            followedEntryRules: true,
+            followedExitRules: true,
+            journalCompleted: false,
+          },
+        } as FuturesTrade;
       
-      // Use imported result if available (from EDGE), otherwise calculate
-      let resultUsd: number;
-      let outcome: Outcome;
-      
-      if (formData.importedResultUsd !== undefined) {
-        // Use imported result from EDGE
-        resultUsd = formData.importedResultUsd;
-        outcome = formData.importedOutcome || (resultUsd > 0.01 ? Outcome.WIN : resultUsd < -0.01 ? Outcome.LOSS : Outcome.BREAKEVEN);
+        const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
+        newTrade = { ...tempTrade, disciplineFlags };
       } else {
-        // Calculate from prices (default behavior)
-        resultUsd = pointsPnL * 12.5 - (formData.importedFeesUsd || 10);
-        outcome = resultUsd > 0.01 ? Outcome.WIN : resultUsd < -0.01 ? Outcome.LOSS : Outcome.BREAKEVEN;
+        const financials = calculateOptionsResults(formData);
+
+        // Calculate discipline flags first
+        const tempTrade = {
+          id: `trade-${now}`,
+          assetClass: AssetClass.OPTIONS,
+          createdAt: now,
+          updatedAt: now,
+          tradeDate: formData.tradeDate,
+          entryTime,
+          exitTime,
+          direction: formData.direction,
+          quantity: formData.quantity,
+          feesUsd: formData.feesUsd,
+          plannedRiskUsd: formData.plannedRiskUsd,
+          ...financials,
+          grade: formData.grade,
+          strategyId: formData.strategyId,
+          strategyVersionId: formData.strategyVersionId,
+          setupTags: formData.setupTags,
+          session: formData.session,
+          marketHoursTag: formData.marketHoursTag,
+          marketRegime: formData.marketRegime,
+          newsTags: [NewsTag.NONE],
+          mistakes: [],
+          notes: formData.notes,
+          attachments: formData.attachments,
+          reviewFlag: false,
+          collections: [],
+          underlying: formData.underlying,
+          expiration: formData.expiration,
+          dte: Math.ceil((new Date(formData.expiration).getTime() - new Date(formData.tradeDate).getTime()) / (1000 * 60 * 60 * 24)),
+          strike: formData.strike,
+          optionType: formData.optionType,
+          entryPremium: formData.entryPremium,
+          exitPremium: formData.exitPremium,
+          contractMultiplier: formData.contractMultiplier,
+          disciplineFlags: {
+            respectedDailyLossLimit: true,
+            respectedMaxTrades: true,
+            respectedMaxContracts: true,
+            hadStopDefined: true,
+            followedEntryRules: true,
+            followedExitRules: true,
+            journalCompleted: false,
+          },
+        } as OptionsTrade;
+      
+        const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
+        newTrade = { ...tempTrade, disciplineFlags };
       }
-      
-      const resultR = resultUsd / formData.plannedRiskUsd;
 
-      // Calculate discipline flags first
-      const tempTrade = {
-        id: `trade-${now}`,
-        assetClass: AssetClass.FUTURES,
-        createdAt: now,
-        updatedAt: now,
-        tradeDate: formData.tradeDate,
-        entryTime,
-        exitTime,
-        direction: formData.direction,
-        quantity: formData.quantity,
-        feesUsd: formData.importedFeesUsd || 10,
-        plannedRiskUsd: formData.plannedRiskUsd,
-        resultUsd,
-        resultR,
-        outcome,
-        grade: formData.grade,
-        strategyId: formData.strategyId,
-        strategyVersionId: formData.strategyVersionId,
-        setupTags: formData.setupTags,
-        session: formData.session,
-        marketHoursTag: formData.marketHoursTag,
-        marketRegime: formData.marketRegime,
-        newsTags: [NewsTag.NONE],
-        mistakes: [],
-        notes: formData.notes,
-        attachments: formData.attachments,
-        reviewFlag: false,
-        collections: [],
-        instrumentRoot: formData.instrumentRoot,
-        entryPrice: formData.entryPrice,
-        exitPrice: formData.exitPrice,
-        tickSize: 0.25,
-        tickValueUsd: 12.5,
-        pointsPnL,
-        ticksPnL: pointsPnL / 0.25,
-        rthEth: RthEth.RTH,
-        disciplineFlags: {
-          respectedDailyLossLimit: true,
-          respectedMaxTrades: true,
-          respectedMaxContracts: true,
-          hadStopDefined: true,
-          followedEntryRules: true,
-          followedExitRules: true,
-          journalCompleted: false,
-        },
-      } as FuturesTrade;
-      
-      const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
-      newTrade = { ...tempTrade, disciplineFlags };
-    } else {
-      const contractMultiplier = 100;
-      const netPremiumPnLUsd = (formData.exitPremium - formData.entryPremium) * formData.quantity * contractMultiplier - 10;
-      const resultUsd = netPremiumPnLUsd;
-      const resultR = resultUsd / (formData.entryPremium * formData.quantity * contractMultiplier);
-      const outcome = resultR > 0.1 ? Outcome.WIN : resultR < -0.1 ? Outcome.LOSS : Outcome.BREAKEVEN;
-
-      // Calculate discipline flags first
-      const tempTrade = {
-        id: `trade-${now}`,
-        assetClass: AssetClass.OPTIONS,
-        createdAt: now,
-        updatedAt: now,
-        tradeDate: formData.tradeDate,
-        entryTime,
-        exitTime,
-        direction: Direction.LONG,
-        quantity: formData.quantity,
-        feesUsd: 10,
-        plannedRiskUsd: formData.entryPremium * formData.quantity * contractMultiplier,
-        resultUsd,
-        resultR,
-        outcome,
-        grade: formData.grade,
-        strategyId: formData.strategyId,
-        strategyVersionId: formData.strategyVersionId,
-        setupTags: formData.setupTags,
-        session: formData.session,
-        marketHoursTag: formData.marketHoursTag,
-        marketRegime: formData.marketRegime,
-        newsTags: [NewsTag.NONE],
-        mistakes: [],
-        notes: formData.notes,
-        attachments: formData.attachments,
-        reviewFlag: false,
-        collections: [],
-        underlying: formData.underlying,
-        expiration: formData.expiration,
-        dte: Math.ceil((new Date(formData.expiration).getTime() - new Date(formData.tradeDate).getTime()) / (1000 * 60 * 60 * 24)),
-        strike: formData.strike,
-        optionType: formData.optionType,
-        entryPremium: formData.entryPremium,
-        exitPremium: formData.exitPremium,
-        contractMultiplier,
-        netPremiumPnLUsd,
-        disciplineFlags: {
-          respectedDailyLossLimit: true,
-          respectedMaxTrades: true,
-          respectedMaxContracts: true,
-          hadStopDefined: true,
-          followedEntryRules: true,
-          followedExitRules: true,
-          journalCompleted: false,
-        },
-      } as OptionsTrade;
-      
-      const disciplineFlags = calculateDisciplineFlags(tempTrade, trades, riskRules, false);
-      newTrade = { ...tempTrade, disciplineFlags };
-    }
-
-    const result = await saveTrades([...trades, newTrade]);
+      const result = await saveTrades([...trades, newTrade]);
     
-    // Show notification if violations were detected
-    if (result.newViolations.length > 0) {
-      const violationCount = result.newViolations.length;
-      const violationNames = result.newViolations[0].violatedRules
-        .map(getViolationRuleName)
-        .join(', ');
-      showToast(
-        `Risk rule violation detected! ${violationCount} rule${violationCount > 1 ? 's' : ''} broken: ${violationNames}. Review in Risk tab.`,
-        'warning',
-        8000
-      );
-    }
+      // Show notification if violations were detected
+      if (result.newViolations.length > 0) {
+        const violationCount = result.newViolations.length;
+        const violationNames = result.newViolations[0].violatedRules
+          .map(getViolationRuleName)
+          .join(', ');
+        showToast(
+          `Risk rule violation detected! ${violationCount} rule${violationCount > 1 ? 's' : ''} broken: ${violationNames}. Review in Risk tab.`,
+          'warning',
+          8000
+        );
+      }
     
-    router.push(`/trades/${newTrade.id}`);
+      router.push(`/trades/${newTrade.id}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to save trade. Please try again.', 'error');
+    } finally { setSaving(false); }
   };
 
   const toggleSetupTag = (tag: SetupTag) => {
-    setFormData({
-      ...formData,
-      setupTags: formData.setupTags.includes(tag)
-        ? formData.setupTags.filter((t) => t !== tag)
-        : [...formData.setupTags, tag],
-    });
+    setFormData((previous) => ({
+      ...previous,
+      setupTags: previous.setupTags.includes(tag)
+        ? previous.setupTags.filter((t) => t !== tag)
+        : [...previous.setupTags, tag],
+    }));
   };
 
   return (
@@ -316,7 +306,7 @@ export default function NewTradePage() {
         </div>
       </div>
       
-      <form onSubmit={handleSubmit} className="p-8 rounded-2xl space-y-8" style={{
+      <form onSubmit={handleSubmit} className="p-4 sm:p-8 rounded-2xl space-y-8" style={{
         background: 'rgba(255,255,255,0.06)',
         backdropFilter: 'blur(16px) saturate(160%)',
         WebkitBackdropFilter: 'blur(16px) saturate(160%)',
@@ -324,7 +314,7 @@ export default function NewTradePage() {
         boxShadow: '0 4px 24px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.08)',
       }}>
         {/* Asset Class Selection - Enhanced */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button
             type="button"
             onClick={() => setAssetClass(AssetClass.FUTURES)}
@@ -381,32 +371,32 @@ export default function NewTradePage() {
             
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Trade Date</label>
-              <input
+              <input aria-label="Trade Date"
                 type="date"
                 value={formData.tradeDate}
-                onChange={(e) => setFormData({ ...formData, tradeDate: e.target.value })}
+                onChange={(e) => updateFormData({ tradeDate: e.target.value })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                 required
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Entry Time</label>
-                <input
+                <input aria-label="Entry Time"
                   type="time"
                   value={formData.entryTime}
-                  onChange={(e) => setFormData({ ...formData, entryTime: e.target.value })}
+                  onChange={(e) => updateFormData({ entryTime: e.target.value })}
                   className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                   required
                 />
               </div>
               <div>
                 <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Exit Time</label>
-                <input
+                <input aria-label="Exit Time"
                   type="time"
                   value={formData.exitTime}
-                  onChange={(e) => setFormData({ ...formData, exitTime: e.target.value })}
+                  onChange={(e) => updateFormData({ exitTime: e.target.value })}
                   className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                   required
                 />
@@ -415,10 +405,10 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-3 uppercase tracking-wide">Direction</label>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, direction: Direction.LONG })}
+                  onClick={() => updateFormData({ direction: Direction.LONG })}
                   className={`px-5 py-3 rounded-xl font-semibold transition-all duration-300 ${
                     formData.direction === Direction.LONG
                       ? 'theme-text shadow-lg scale-[1.02]'
@@ -440,7 +430,7 @@ export default function NewTradePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormData({ ...formData, direction: Direction.SHORT })}
+                  onClick={() => updateFormData({ direction: Direction.SHORT })}
                   className={`px-5 py-3 rounded-xl font-semibold transition-all duration-300 ${
                     formData.direction === Direction.SHORT
                       ? 'theme-text shadow-lg scale-[1.02]'
@@ -465,10 +455,10 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Quantity</label>
-              <input
+              <input aria-label="Quantity"
                 type="number"
                 value={formData.quantity}
-                onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
+                onChange={(e) => updateFormData({ quantity: parseInt(e.target.value) || 1 })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                 required
                 min="1"
@@ -477,16 +467,32 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Planned Risk (USD)</label>
-              <input
+              <input aria-label="Planned Risk (USD)"
                 type="number"
                 value={formData.plannedRiskUsd}
-                onChange={(e) => setFormData({ ...formData, plannedRiskUsd: parseFloat(e.target.value) || 0 })}
+                onChange={(e) => updateFormData({ plannedRiskUsd: parseFloat(e.target.value) || 0 })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                 required
                 min="0"
                 step="0.01"
               />
             </div>
+            <label className="block text-sm theme-text-secondary">
+              Total fees (USD)
+              <input aria-label="Total fees (USD)" type="number" min="0" step="0.01" required
+                value={formData.feesUsd}
+                onChange={(e) => updateFormData({ feesUsd: Number(e.target.value) })}
+                className="mt-2 w-full theme-bg-secondary border theme-border theme-text rounded-md px-3 py-2" />
+            </label>
+            {assetClass === AssetClass.OPTIONS && (
+              <label className="block text-sm theme-text-secondary">
+                Contract multiplier
+                <input aria-label="Contract multiplier" type="number" min="1" step="1" required
+                  value={formData.contractMultiplier}
+                  onChange={(e) => updateFormData({ contractMultiplier: Number(e.target.value) })}
+                  className="mt-2 w-full theme-bg-secondary border theme-border theme-text rounded-md px-3 py-2" />
+              </label>
+            )}
           </div>
 
           {/* Instrument & Strategy */}
@@ -502,12 +508,15 @@ export default function NewTradePage() {
               <>
                 <div>
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Instrument</label>
-                  <select
+                  <select aria-label="Instrument"
                     value={formData.instrumentRoot}
-                    onChange={(e) => setFormData({ ...formData, instrumentRoot: e.target.value as FuturesInstrument })}
+                    onChange={(e) => updateFormData({ instrumentRoot: e.target.value as FuturesInstrument, tickSize: undefined, tickValueUsd: undefined })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     required
                   >
+                    {!Object.values(FuturesInstrument).includes(formData.instrumentRoot) && (
+                      <option value={formData.instrumentRoot}>{formData.instrumentRoot}</option>
+                    )}
                     <optgroup label="Equity Index">
                       {FUTURES_GROUPS.EQUITY_INDEX.map((inst) => (
                         <option key={inst} value={inst}>{inst}</option>
@@ -545,25 +554,27 @@ export default function NewTradePage() {
                     </optgroup>
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <FuturesTickFields instrumentRoot={formData.instrumentRoot} tickSize={formData.tickSize}
+                  tickValueUsd={formData.tickValueUsd} onChange={updateFormData} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Entry Price</label>
-                    <input
+                    <input aria-label="Entry Price"
                       type="number"
                       value={formData.entryPrice}
-                      onChange={(e) => setFormData({ ...formData, entryPrice: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ entryPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                      step="0.01"
+                      step="any"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Exit Price</label>
-                    <input
+                    <input aria-label="Exit Price"
                       type="number"
                       value={formData.exitPrice}
-                      onChange={(e) => setFormData({ ...formData, exitPrice: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ exitPrice: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                      step="0.01"
+                      step="any"
                     />
                   </div>
                 </div>
@@ -572,9 +583,9 @@ export default function NewTradePage() {
               <>
                 <div>
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Underlying</label>
-                  <select
+                  <select aria-label="Underlying"
                     value={formData.underlying}
-                    onChange={(e) => setFormData({ ...formData, underlying: e.target.value as OptionsUnderlying })}
+                    onChange={(e) => updateFormData({ underlying: e.target.value as OptionsUnderlying })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     required
                   >
@@ -583,22 +594,22 @@ export default function NewTradePage() {
                     ))}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strike</label>
-                    <input
+                    <input aria-label="Strike"
                       type="number"
                       value={formData.strike}
-                      onChange={(e) => setFormData({ ...formData, strike: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ strike: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                       step="0.01"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Type</label>
-                    <select
+                    <select aria-label="Type"
                       value={formData.optionType}
-                      onChange={(e) => setFormData({ ...formData, optionType: e.target.value as OptionType })}
+                      onChange={(e) => updateFormData({ optionType: e.target.value as OptionType })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     >
                       <option value={OptionType.CALL}>Call</option>
@@ -606,22 +617,22 @@ export default function NewTradePage() {
                     </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Expiration</label>
-                    <input
+                    <input aria-label="Expiration"
                       type="date"
                       value={formData.expiration}
-                      onChange={(e) => setFormData({ ...formData, expiration: e.target.value })}
+                      onChange={(e) => updateFormData({ expiration: e.target.value })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Entry Premium</label>
-                    <input
+                    <input aria-label="Entry Premium"
                       type="number"
                       value={formData.entryPremium}
-                      onChange={(e) => setFormData({ ...formData, entryPremium: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => updateFormData({ entryPremium: parseFloat(e.target.value) || 0 })}
                       className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                       step="0.01"
                     />
@@ -629,10 +640,10 @@ export default function NewTradePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Exit Premium</label>
-                  <input
+                  <input aria-label="Exit Premium"
                     type="number"
                     value={formData.exitPremium}
-                    onChange={(e) => setFormData({ ...formData, exitPremium: parseFloat(e.target.value) || 0 })}
+                    onChange={(e) => updateFormData({ exitPremium: parseFloat(e.target.value) || 0 })}
                     className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
                     step="0.01"
                   />
@@ -641,14 +652,13 @@ export default function NewTradePage() {
             )}
 
             <div>
-              <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy</label>
-              <select
+              <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy (optional)</label>
+              <select aria-label="Strategy (optional)"
                 value={formData.strategyId}
-                onChange={(e) => setFormData({ ...formData, strategyId: e.target.value, strategyVersionId: '' })}
+                onChange={(e) => updateFormData({ strategyId: e.target.value, strategyVersionId: '' })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                required
               >
-                <option value="">Select Strategy</option>
+                <option value="">No strategy</option>
                 {strategies.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -657,14 +667,13 @@ export default function NewTradePage() {
 
             {strategyVersions.length > 0 && (
               <div>
-                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy Version</label>
-                <select
+                <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Strategy Version (optional)</label>
+                <select aria-label="Strategy Version (optional)"
                   value={formData.strategyVersionId}
-                  onChange={(e) => setFormData({ ...formData, strategyVersionId: e.target.value })}
+                  onChange={(e) => updateFormData({ strategyVersionId: e.target.value })}
                   className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
-                  required
                 >
-                  <option value="">Select Version</option>
+                  <option value="">No version</option>
                   {strategyVersions.map((v) => (
                     <option key={v.id} value={v.id}>{v.version}</option>
                   ))}
@@ -674,9 +683,9 @@ export default function NewTradePage() {
 
             <div>
               <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Grade</label>
-              <select
+              <select aria-label="Grade"
                 value={formData.grade}
-                onChange={(e) => setFormData({ ...formData, grade: e.target.value as Grade })}
+                onChange={(e) => updateFormData({ grade: e.target.value as Grade })}
                 className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
               >
                 <option value={Grade.A_PLUS}>A+</option>
@@ -734,9 +743,9 @@ export default function NewTradePage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div>
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Session</label>
-            <select
+            <select aria-label="Session"
               value={formData.session}
-              onChange={(e) => setFormData({ ...formData, session: e.target.value as Session })}
+              onChange={(e) => updateFormData({ session: e.target.value as Session })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
             >
               {Object.values(Session).map((session) => (
@@ -746,9 +755,9 @@ export default function NewTradePage() {
           </div>
           <div>
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Market Regime</label>
-            <select
+            <select aria-label="Market Regime"
               value={formData.marketRegime}
-              onChange={(e) => setFormData({ ...formData, marketRegime: e.target.value as MarketRegime })}
+              onChange={(e) => updateFormData({ marketRegime: e.target.value as MarketRegime })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
             >
               {Object.values(MarketRegime).map((regime) => (
@@ -758,9 +767,9 @@ export default function NewTradePage() {
           </div>
           <div>
             <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Market Hours</label>
-            <select
+            <select aria-label="Market Hours"
               value={formData.marketHoursTag}
-              onChange={(e) => setFormData({ ...formData, marketHoursTag: e.target.value as MarketHoursTag })}
+              onChange={(e) => updateFormData({ marketHoursTag: e.target.value as MarketHoursTag })}
               className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium"
             >
               {Object.values(MarketHoursTag).map((hours) => (
@@ -773,9 +782,9 @@ export default function NewTradePage() {
         {/* Notes */}
         <div>
           <label className="block text-sm font-semibold theme-text-secondary mb-2 uppercase tracking-wide">Notes</label>
-          <textarea
+          <textarea aria-label="Notes"
             value={formData.notes}
-            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            onChange={(e) => updateFormData({ notes: e.target.value })}
             className="w-full theme-bg-secondary border theme-border theme-text rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 font-medium resize-none"
             rows={5}
             placeholder="Add any additional notes about this trade..."
@@ -784,15 +793,18 @@ export default function NewTradePage() {
 
         {/* Screenshots */}
         <ImageUpload
+          disabled={saving}
+          onBusyChange={setReadingImages}
           attachments={formData.attachments}
-          onAttachmentsChange={(attachments) => setFormData({ ...formData, attachments })}
+          onAttachmentsChange={(attachments) => updateFormData({ attachments })}
           maxImages={10}
         />
 
         {/* Actions - Enhanced */}
-        <div className="flex space-x-4 pt-6 border-t-2 theme-border">
+        <div className="flex flex-col sm:flex-row gap-3 pt-6 border-t-2 theme-border">
           <button
             type="submit"
+            disabled={saving || readingImages}
             className="flex-1 px-8 py-4 rounded-xl font-bold text-lg theme-text transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
             style={{
               background: 'rgba(255,255,255,0.10)',
@@ -802,7 +814,7 @@ export default function NewTradePage() {
               boxShadow: '0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.2)',
             }}
           >
-            Create Trade
+            {saving ? 'Saving…' : readingImages ? 'Loading screenshots…' : 'Create Trade'}
           </button>
           <button
             type="button"

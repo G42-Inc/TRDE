@@ -1,25 +1,16 @@
 import crypto from 'crypto';
 
-/**
- * Encryption key from environment (must be 32 bytes for AES-256)
- * Generate with: openssl rand -base64 32
- */
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
-
-if (!ENCRYPTION_KEY) {
-  throw new Error('ENCRYPTION_KEY environment variable is required');
-}
-
-// Convert base64 key to buffer
-const key = Buffer.from(ENCRYPTION_KEY, 'base64');
-
-if (key.length !== 32) {
-  throw new Error('ENCRYPTION_KEY must be 32 bytes (base64 encoded)');
+/** Read the existing base64 key when encryption is used, never at build time. */
+function getEncryptionKey(): Buffer {
+  const encoded = process.env.ENCRYPTION_KEY;
+  if (!encoded) throw new Error('ENCRYPTION_KEY environment variable is required');
+  const key = Buffer.from(encoded, 'base64');
+  if (key.length !== 32) throw new Error('ENCRYPTION_KEY must be 32 bytes (base64 encoded)');
+  return key;
 }
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16; // 128 bits
-const TAG_LENGTH = 16; // 128 bits
 
 /**
  * Encrypt sensitive data (tokens, API keys, etc.)
@@ -29,7 +20,7 @@ const TAG_LENGTH = 16; // 128 bits
  */
 export function encrypt(plaintext: string): string {
   const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const cipher = crypto.createCipheriv(ALGORITHM, getEncryptionKey(), iv);
 
   let encrypted = cipher.update(plaintext, 'utf8');
   encrypted = Buffer.concat([encrypted, cipher.final()]);
@@ -60,7 +51,7 @@ export function decrypt(encryptedData: string): string {
   const tag = Buffer.from(tagBase64, 'base64');
   const encrypted = Buffer.from(encryptedBase64, 'base64');
 
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  const decipher = crypto.createDecipheriv(ALGORITHM, getEncryptionKey(), iv);
   decipher.setAuthTag(tag);
 
   let decrypted = decipher.update(encrypted);

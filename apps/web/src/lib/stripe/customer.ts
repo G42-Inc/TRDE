@@ -5,12 +5,10 @@
  * Ensures one-to-one mapping between Clerk users and Stripe customers.
  */
 
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
+import { getStripeClient } from '@/lib/stripe/client';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-11-20.acacia' as any,
-});
 
 /**
  * Get or create a Stripe customer for a Clerk user
@@ -47,7 +45,7 @@ export async function getOrCreateStripeCustomer(
     if (existingMapping?.stripe_customer_id) {
       // Customer exists, retrieve from Stripe
       try {
-        const customer = await stripe.customers.retrieve(existingMapping.stripe_customer_id);
+        const customer = await getStripeClient().customers.retrieve(existingMapping.stripe_customer_id);
         if (!customer.deleted) {
           return customer as Stripe.Customer;
         }
@@ -65,7 +63,7 @@ export async function getOrCreateStripeCustomer(
 
     // Create new Stripe customer with idempotency key to prevent duplicates
     // Use userId as idempotency key to ensure only one customer per user
-    const customer = await stripe.customers.create({
+    const customer = await getStripeClient().customers.create({
       email: email,
       name: name,
       metadata: {
@@ -79,7 +77,7 @@ export async function getOrCreateStripeCustomer(
     // This ensures Stripe customer always has latest email from Clerk
     if (customer.email && email && customer.email !== email) {
       try {
-        await stripe.customers.update(customer.id, {
+        await getStripeClient().customers.update(customer.id, {
           email: email,
         });
       } catch (updateError) {
@@ -100,14 +98,14 @@ export async function getOrCreateStripeCustomer(
       // Race condition: another request created a customer first
       // Delete the customer we just created and use the existing one
       try {
-        await stripe.customers.del(customer.id);
+        await getStripeClient().customers.del(customer.id);
       } catch (deleteError) {
         // Ignore delete errors - customer might already be in use
         console.log('Could not delete duplicate customer:', deleteError);
       }
       
       // Return the existing customer
-      const existingCustomer = await stripe.customers.retrieve(existingAfterCreate.stripe_customer_id);
+      const existingCustomer = await getStripeClient().customers.retrieve(existingAfterCreate.stripe_customer_id);
       if (!existingCustomer.deleted) {
         return existingCustomer as Stripe.Customer;
       }
@@ -183,7 +181,7 @@ export async function getStripeCustomer(
       return null;
     }
 
-    const customer = await stripe.customers.retrieve(customerId);
+    const customer = await getStripeClient().customers.retrieve(customerId);
     if (customer.deleted) {
       return null;
     }
@@ -193,7 +191,7 @@ export async function getStripeCustomer(
     // Sync email if provided and different from Stripe customer email
     if (currentEmail && stripeCustomer.email && stripeCustomer.email !== currentEmail) {
       try {
-        await stripe.customers.update(stripeCustomer.id, {
+        await getStripeClient().customers.update(stripeCustomer.id, {
           email: currentEmail,
         });
         // Update local cache

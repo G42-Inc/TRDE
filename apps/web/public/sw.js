@@ -1,127 +1,82 @@
-// TRDE Service Worker
-const CACHE_NAME = 'trde-cache-v1';
-const STATIC_CACHE_NAME = 'trde-static-v1';
+// TRDE Service Worker: cache only public, same-origin static assets.
+// v2 retires the old HTML cache and refreshes unversioned branding from the network.
+const STATIC_CACHE_NAME = 'trde-static-v2';
+const MAX_STATIC_ENTRIES = 80;
 
-// Static assets to cache on install
-const STATIC_ASSETS = [
-  '/logos/TRDE_black_transparent_64x64.png',
-  '/logos/TRDE_black_transparent_128x128.png',
-  '/logos/TRDE_black_transparent_256x256.png',
-  '/logos/TRDE_black_transparent_512x512.png',
-  '/logos/TRDE_white_transparent_512x512.png',
-  '/favicons/TRDE_favicon_black_16x16.png',
-  '/favicons/TRDE_favicon_black_32x32.png',
-  '/favicons/TRDE_favicon_black_64x64.png',
-  '/manifest.json',
-];
+function isPublicStaticRequest(request) {
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin) return false;
+  if (request.mode === 'navigate' || request.destination === 'document') return false;
+  if (request.headers.has('authorization') || request.headers.has('range')) return false;
+  // Query strings may carry RSC state, signatures or user-specific tokens.
+  if (request.headers.has('rsc') || url.search) return false;
+  const accept = request.headers.get('accept') || '';
+  if (/text\/(html|x-component)/i.test(accept)) return false;
 
-// Install event - cache static assets
+  // Never infer public access from a file extension alone: uploads, API responses,
+  // optimized remote images and journal attachments must bypass this worker.
+  return url.pathname === '/manifest.json' ||
+    /^\/(logos|favicons)\/[^/]+\.(png|webp|avif|jpg|jpeg|svg|ico)$/i.test(url.pathname) ||
+    /^\/fonts\/.+\.(woff2?|ttf|otf)$/i.test(url.pathname) ||
+    /^\/_next\/static\/.+\.(js|css|woff2?|ttf|otf|png|webp|avif|jpg|jpeg|svg|ico)$/i.test(url.pathname);
+}
+
+function isCacheableResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  const cacheControl = response.headers.get('cache-control') || '';
+  return response.status === 200 && !response.redirected &&
+    !/text\/(html|x-component)/i.test(contentType) &&
+    !/\b(no-store|private)\b/i.test(cacheControl);
+}
+
+async function storePublicAsset(request, response) {
+  const cache = await caches.open(STATIC_CACHE_NAME);
+  await cache.put(request, response);
+  const keys = await cache.keys();
+  await Promise.all(keys.slice(0, Math.max(0, keys.length - MAX_STATIC_ENTRIES))
+    .map((key) => cache.delete(key)));
+}
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(STATIC_CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    })
-  );
-  // Activate immediately
-  self.skipWaiting();
+  // Fill the cache on demand instead of fetching branding before it is needed.
+  event.waitUntil(self.skipWaiting());
 });
 
-// Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME && name !== STATIC_CACHE_NAME)
-          .map((name) => caches.delete(name))
-      );
-    })
-  );
-  // Take control immediately
-  self.clients.claim();
+  event.waitUntil((async () => {
+    // This origin can have other apps' caches. Remove only TRDE's old caches,
+    // including the previous cache that stored signed-in HTML pages.
+    await caches.keys().then((names) => Promise.all(names
+      .filter((name) => /^(trde-cache-|trde-static-)/.test(name) && name !== STATIC_CACHE_NAME)
+      .map((name) => caches.delete(name))))
+      .catch(() => {});
+    await self.clients.claim();
+  })());
 });
 
-// Fetch event - network-first for API, cache-first for static
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  if (!isPublicStaticRequest(event.request)) return;
 
-  // Skip non-GET requests
-  if (event.request.method !== 'GET') {
-    return;
-  }
+  // Network-first ensures public logos/fonts are refreshed. The browser's HTTP
+  // cache still handles immutable Next assets; offline fallback is static only.
+  const networkResponse = fetch(event.request);
+  event.respondWith(networkResponse.catch(async (networkError) => {
+    try {
+      const cache = await caches.open(STATIC_CACHE_NAME);
+      const cachedResponse = await cache.match(event.request);
+      if (cachedResponse) return cachedResponse;
+    } catch {
+      // A blocked/full cache must not replace the original network failure.
+    }
+    throw networkError;
+  }));
 
-  // Skip cross-origin requests (Clerk, Stripe, Supabase)
-  if (url.origin !== self.location.origin) {
-    return;
-  }
-
-  // Skip API routes - always network
-  if (url.pathname.startsWith('/api/')) {
-    return;
-  }
-
-  // Skip auth-related routes
-  if (url.pathname.startsWith('/sign-in') || 
-      url.pathname.startsWith('/sign-up') ||
-      url.pathname.startsWith('/auth')) {
-    return;
-  }
-
-  // Static assets (images, fonts, logos) - cache-first
-  if (url.pathname.match(/\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|otf)$/)) {
-    event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
-        if (cachedResponse) {
-          return cachedResponse;
-        }
-        return fetch(event.request).then((response) => {
-          // Don't cache non-successful responses
-          if (!response || response.status !== 200) {
-            return response;
-          }
-          const responseToCache = response.clone();
-          caches.open(STATIC_CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-          return response;
-        });
-      })
-    );
-    return;
-  }
-
-  // HTML pages - network-first with cache fallback
-  if (event.request.headers.get('accept')?.includes('text/html')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          // Cache successful responses
-          if (response && response.status === 200) {
-            const responseToCache = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
-          }
-          return response;
-        })
-        .catch(() => {
-          // Return cached version if network fails
-          return caches.match(event.request);
-        })
-    );
-    return;
-  }
-
-  // Other requests - network-first
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request);
-      })
-  );
+  // Keep cache writes alive without delaying or breaking the network response.
+  event.waitUntil(networkResponse.then((response) => {
+    if (isCacheableResponse(response)) {
+      return storePublicAsset(event.request, response.clone());
+    }
+  }).catch(() => {}));
 });
 
 // Handle messages from the app

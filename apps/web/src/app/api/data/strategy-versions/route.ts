@@ -1,3 +1,6 @@
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
+import { strategyVersionFromRow, strategyVersionToRow } from '@/lib/journal/records';
+import { saveOwnedRecords, RecordConflictError, InvalidRecordError, requireOwnedReferences } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -9,8 +12,7 @@ import type { StrategyVersion } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -35,13 +37,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const versions: StrategyVersion[] = (data || []).map((row: any) => ({
-      id: row.id,
-      strategyId: row.strategy_id,
-      version: row.version || '',
-      description: row.description || undefined,
-      createdAt: row.created_at,
-    }));
+    const versions = (data || []).map(strategyVersionFromRow);
 
     return NextResponse.json({ versions });
   } catch (error: any) {
@@ -60,8 +56,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -69,6 +64,10 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const demo = await checkDemoStatus(userId);
+    if (demo.error) return NextResponse.json({ error: 'Could not verify journal access. Please retry.' }, { status: 503 });
+    if (demo.isDemo) return createDemoBlockedResponse('saving journal data');
 
     const body = await request.json();
     const { versions } = body;
@@ -100,33 +99,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, count: 0, deleted: true });
     }
 
-    const dbVersions = versions.map((version: StrategyVersion) => ({
-      id: version.id,
-      strategy_id: version.strategyId,
-      user_id: userId,
-      version: version.version || '',
-      description: version.description || null,
-      created_at: version.createdAt,
-      updated_at: version.createdAt, // StrategyVersion type doesn't have updatedAt, use createdAt
-      metadata: {},
-    }));
+    const dbVersions = versions.map((version: StrategyVersion) => strategyVersionToRow(version, userId));
 
-    const { error } = await supabase
-      .from('user_strategy_versions')
-      .upsert(dbVersions, {
-        onConflict: 'id',
-      });
-
-    if (error) {
-      console.error('Error saving strategy versions:', error);
-      return NextResponse.json(
-        { error: 'Failed to save strategy versions' },
-        { status: 500 }
-      );
-    }
+    await requireOwnedReferences(supabase, 'user_strategies', userId, versions.map((version: StrategyVersion) => version.strategyId));
+    await saveOwnedRecords(supabase, 'user_strategy_versions', userId, dbVersions);
 
     return NextResponse.json({ success: true, count: versions.length });
   } catch (error: any) {
+    if (error instanceof RecordConflictError || error instanceof InvalidRecordError) {
+      return NextResponse.json({ error: error.message }, { status: error instanceof RecordConflictError ? 409 : 400 });
+    }
     console.error('Error in POST /api/data/strategy-versions:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },

@@ -23,10 +23,11 @@
   --dash-focus-ring: rgba(201, 169, 98, 0.4);
   --dash-glass-tint: rgba(201, 169, 98, 0.08);
 
+  /* Readable over bright/noisy scene artwork, with a translucent edge. */
   /* Glass surface — base */
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.78);
-  --glass-bg-subtle: rgba(255, 255, 255, 0.35);
+  --glass-bg: rgba(255, 255, 255, 0.88);
+  --glass-bg-strong: rgba(255, 255, 255, 0.96);
+  --glass-bg-subtle: rgba(255, 255, 255, 0.72);
 
   /* Glass borders */
   --glass-border: rgba(255, 255, 255, 0.45);
@@ -42,8 +43,8 @@
   --glass-shadow-subtle: 0 2px 12px rgba(0, 0, 0, 0.04);
 
   /* Blur + saturation */
-  --glass-blur: blur(24px) saturate(180%);
-  --glass-blur-strong: blur(40px) saturate(200%);
+  --glass-blur: blur(16px) saturate(130%);
+  --glass-blur-strong: blur(24px) saturate(140%);
 
   /* Border radius (consistent across all primitives) */
   --glass-radius-sm: 10px;
@@ -57,7 +58,7 @@
   /* Text on glass */
   --glass-text: #0f172a;
   --glass-text-secondary: #475569;
-  --glass-text-tertiary: #94a3b8;
+  --glass-text-tertiary: #526077;
 }
 
 /* ---------------------------------------------------------------------------
@@ -65,9 +66,9 @@
    --------------------------------------------------------------------------- */
 [data-dashboard-scene="dark"],
 [data-dashboard-scene="night"] {
-  --glass-bg: rgba(0, 0, 0, 0.15);
-  --glass-bg-strong: rgba(0, 0, 0, 0.35);
-  --glass-bg-subtle: rgba(0, 0, 0, 0.08);
+  --glass-bg: rgba(8, 15, 28, 0.84);
+  --glass-bg-strong: rgba(8, 15, 28, 0.96);
+  --glass-bg-subtle: rgba(8, 15, 28, 0.68);
 
   --glass-border: rgba(255, 255, 255, 0.10);
   --glass-border-hover: rgba(255, 255, 255, 0.18);
@@ -83,14 +84,14 @@
 
   --glass-text: #f8fafc;
   --glass-text-secondary: #cbd5e1;
-  --glass-text-tertiary: #94a3b8;
+  --glass-text-tertiary: #b4c0d0;
 }
 
 /* Also apply dark tokens when the html has .dark class */
 .dark [data-dashboard-scene] {
-  --glass-bg: rgba(0, 0, 0, 0.15);
-  --glass-bg-strong: rgba(0, 0, 0, 0.35);
-  --glass-bg-subtle: rgba(0, 0, 0, 0.08);
+  --glass-bg: rgba(8, 15, 28, 0.84);
+  --glass-bg-strong: rgba(8, 15, 28, 0.96);
+  --glass-bg-subtle: rgba(8, 15, 28, 0.68);
 
   --glass-border: rgba(255, 255, 255, 0.10);
   --glass-border-hover: rgba(255, 255, 255, 0.18);
@@ -106,7 +107,7 @@
 
   --glass-text: #f8fafc;
   --glass-text-secondary: #cbd5e1;
-  --glass-text-tertiary: #94a3b8;
+  --glass-text-tertiary: #b4c0d0;
 }
 
 /* ---------------------------------------------------------------------------
@@ -247,3 +248,8 @@
     transition: none;
   }
 }
+
+/* Bright artwork must not wash out gold links or solid-gold button labels. */
+[data-dashboard-scene="dark"] a.text-accent,
+[data-dashboard-scene="night"] a.text-accent { color: #f0d69b; }
+[data-dashboard-scene] .bg-accent { color: #17191e; }

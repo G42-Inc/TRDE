@@ -29,10 +29,10 @@ export async function POST(request: NextRequest) {
       // Try to get user from Clerk
       let clerkUser;
       if (userId) {
-        clerkUser = await clerkClient.users.getUser(userId);
+        clerkUser = await (await clerkClient()).users.getUser(userId);
       } else {
         // Search by email - Clerk API allows searching by email
-        const users = await clerkClient.users.getUserList({ emailAddress: [email] });
+        const users = await (await clerkClient()).users.getUserList({ emailAddress: [email] });
         if (!users.data || users.data.length === 0) {
           return NextResponse.json(
             { error: `No user found with email: ${email}` },

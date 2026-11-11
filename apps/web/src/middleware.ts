@@ -10,20 +10,6 @@ import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Validate application configuration at startup
-// This runs once when the middleware module is loaded
-try {
-  // Only validate in production or when explicitly enabled
-  // In development, we allow missing env vars for flexibility
-  if (process.env.NODE_ENV === 'production' || process.env.VALIDATE_ENV === 'true') {
-    const { validateApplicationStartup } = require('@/lib/startup-validation');
-    validateApplicationStartup();
-  }
-} catch (error) {
-  // Log but don't crash - validation errors will show in logs
-  console.error('Startup validation error (non-fatal):', error);
-}
-
 /**
  * Public routes that don't require authentication
  */
@@ -54,6 +40,7 @@ const isProtectedRoute = createRouteMatcher([
   '/admin(.*)',
   '/trades(.*)',
   '/analytics(.*)',
+  '/performance(.*)',
   '/journal(.*)',
   '/review(.*)',
   '/strategies(.*)',
@@ -61,7 +48,10 @@ const isProtectedRoute = createRouteMatcher([
   '/settings(.*)',
   '/welcome(.*)', // Onboarding flow - requires auth but not entitlement
   '/api/entitlements(.*)',
-  '/api/billing/checkout(.*)',
+  '/api/billing(.*)',
+  '/api/auth(.*)',
+  '/api/edge(.*)',
+  '/api/settings(.*)',
   '/api/admin(.*)',
   '/api/connections(.*)',
   '/api/data(.*)',
@@ -81,40 +71,36 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
   // This is required for server components to use auth() or currentUser()
   const { userId } = await auth();
 
+  // Remove the legacy identity header. Handlers read Clerk's verified auth context.
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.delete('x-clerk-user-id');
+
+  const next = () => NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+
   // Allow public routes - auth context is now set up even if no userId
   if (isPublicRoute(req)) {
-    // For API routes on public pages, pass userId via request headers if authenticated
-    if (pathname.startsWith('/api/') && userId) {
-      const requestHeaders = new Headers(req.headers);
-      requestHeaders.set('x-clerk-user-id', userId);
-      return NextResponse.next({
-        request: { headers: requestHeaders },
-      });
-    }
-    return NextResponse.next();
+    return next();
   }
 
   // Protected routes require authentication
-  if (isProtectedRoute(req) && !userId) {
+  if ((pathname.startsWith('/api/') || isProtectedRoute(req)) && !userId) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { error: 'Unauthorized: Authentication required' },
+        { status: 401 }
+      );
+    }
     const signInUrl = new URL('/sign-in', req.url);
     signInUrl.searchParams.set('redirect_url', pathname);
     return NextResponse.redirect(signInUrl);
   }
 
-  // Pass userId via request headers for ALL protected routes (not just API)
-  // This allows server components like ProtectedRoute to read the userId
-  if (userId) {
-    const requestHeaders = new Headers(req.headers);
-    requestHeaders.set('x-clerk-user-id', userId);
-    return NextResponse.next({
-      request: { headers: requestHeaders },
-    });
-  }
-
   // Note: Entitlement checks happen in server components/layouts
   // This middleware only ensures authentication is present
 
-  return NextResponse.next();
+  return next();
 });
 
 export const config = {

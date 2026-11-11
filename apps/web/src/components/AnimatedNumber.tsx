@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { motion, useSpring, useTransform } from 'framer-motion';
+import React, { useEffect } from 'react';
+import { motion, useReducedMotion, useSpring, useTransform } from 'framer-motion';
 
 interface AnimatedNumberProps {
   value: number;
@@ -22,11 +22,10 @@ export function AnimatedNumber({
   decimals,
   className = '',
 }: AnimatedNumberProps) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [isVisible, setIsVisible] = useState(false);
+  const reducedMotion = useReducedMotion();
   
   // Spring animation for the number
-  const spring = useSpring(0, {
+  const spring = useSpring(value, {
     stiffness: 75,
     damping: 25,
     duration: duration * 1000,
@@ -41,42 +40,25 @@ export function AnimatedNumber({
     } : {}),
   };
   
-  // Transform the spring value to formatted string
-  const display = useTransform(spring, (current) => {
+  const formatValue = (current: number) => {
     const formatter = new Intl.NumberFormat('en-US', mergedFormatOptions);
-    const formattedValue = decimals !== undefined ? current : Math.round(current);
+    const formattedValue = decimals !== undefined || formatOptions ? current : Math.round(current);
     return `${prefix}${formatter.format(formattedValue)}${suffix}`;
-  });
+  };
+  const display = useTransform(spring, formatValue);
 
-  // Intersection Observer to start animation when visible
+  // Show the actual result immediately; animate only subsequent value changes.
+  // Screen readers always receive the final value, including offscreen metrics.
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (ref.current) {
-      observer.observe(ref.current);
-    }
-
-    return () => observer.disconnect();
-  }, []);
-
-  // Update spring when value changes or becomes visible
-  useEffect(() => {
-    if (isVisible) {
-      spring.set(value);
-    }
-  }, [spring, value, isVisible]);
+    if (reducedMotion) spring.jump(value);
+    else spring.set(value);
+  }, [spring, value, reducedMotion]);
 
   return (
-    <motion.span ref={ref} className={className}>
-      {display}
-    </motion.span>
+    <span className={className}>
+      <span className="sr-only">{formatValue(value)}</span>
+      <motion.span aria-hidden="true">{display}</motion.span>
+    </span>
   );
 }
 

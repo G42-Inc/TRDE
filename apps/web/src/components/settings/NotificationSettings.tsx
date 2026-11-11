@@ -21,17 +21,21 @@ interface NotificationSettingsProps {
 
 interface ToggleProps {
   enabled: boolean;
+  label: string;
   onChange: (enabled: boolean) => void;
   disabled?: boolean;
 }
 
-function Toggle({ enabled, onChange, disabled }: ToggleProps) {
+function Toggle({ enabled, label, onChange, disabled }: ToggleProps) {
   return (
     <button
       type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={enabled}
       onClick={() => !disabled && onChange(!enabled)}
       disabled={disabled}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
         disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
       } ${enabled ? 'bg-accent' : 'bg-white/20'}`}
     >
@@ -72,10 +76,9 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
           credentials: 'include',
         });
         
-        if (response.ok) {
-          const data = await response.json();
-          setPreferences(data.preferences);
-        }
+        if (!response.ok) throw new Error('Failed to load notification settings');
+        const data = await response.json();
+        setPreferences(data.preferences);
       } catch (err) {
         console.error('[NotificationSettings] Fetch error:', err);
         setError('Failed to load notification settings');
@@ -89,7 +92,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
 
   // Update a preference
   const updatePreference = async (key: keyof NotificationPreferences, value: boolean) => {
-    if (!preferences) return;
+    if (!preferences || isSaving) return;
 
     setIsSaving(true);
     setError(null);
@@ -137,7 +140,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
 
   if (isLoading) {
     return (
-      <div className={`p-6 rounded-xl bg-white/[0.02] border border-white/10 ${className}`}>
+      <div className={`p-4 sm:p-6 rounded-xl bg-white/[0.02] border border-white/10 ${className}`}>
         <div className="flex items-center justify-center py-8">
           <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
         </div>
@@ -147,7 +150,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
 
   if (!preferences) {
     return (
-      <div className={`p-6 rounded-xl bg-white/[0.02] border border-white/10 ${className}`}>
+      <div className={`p-4 sm:p-6 rounded-xl bg-white/[0.02] border border-white/10 ${className}`}>
         <p className="text-center text-white/40">Failed to load settings</p>
       </div>
     );
@@ -160,7 +163,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
       className={`rounded-xl bg-white/[0.02] border border-white/10 ${className}`}
     >
       {/* Header */}
-      <div className="p-6 border-b border-white/10">
+      <div className="p-4 sm:p-6 border-b border-white/10">
         <div className="flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-white/5">
             <BellIcon className="w-6 h-6 text-white/60" />
@@ -180,7 +183,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
       )}
 
       {/* Email Notifications Section */}
-      <div className="p-6 border-b border-white/10">
+      <div className="p-4 sm:p-6 border-b border-white/10">
         <div className="flex items-center gap-2 mb-4">
           <EnvelopeIcon className="w-5 h-5 text-white/40" />
           <h3 className="font-medium text-white">Email Notifications</h3>
@@ -197,6 +200,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
               </div>
             </div>
             <Toggle
+              label="Daily digest"
               enabled={preferences.dailyDigest}
               onChange={(v) => updatePreference('dailyDigest', v)}
               disabled={isSaving}
@@ -213,6 +217,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
               </div>
             </div>
             <Toggle
+              label="Weekly summary"
               enabled={preferences.weeklySummary}
               onChange={(v) => updatePreference('weeklySummary', v)}
               disabled={isSaving}
@@ -229,6 +234,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
               </div>
             </div>
             <Toggle
+              label="Achievement notifications"
               enabled={preferences.achievementNotifications}
               onChange={(v) => updatePreference('achievementNotifications', v)}
               disabled={isSaving}
@@ -245,6 +251,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
               </div>
             </div>
             <Toggle
+              label="Insight alerts"
               enabled={preferences.insightAlerts}
               onChange={(v) => updatePreference('insightAlerts', v)}
               disabled={isSaving}
@@ -254,7 +261,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
       </div>
 
       {/* Push Notifications Section */}
-      <div className="p-6 border-b border-white/10">
+      <div className="p-4 sm:p-6 border-b border-white/10">
         <div className="flex items-center gap-2 mb-4">
           <DevicePhoneMobileIcon className="w-5 h-5 text-white/40" />
           <h3 className="font-medium text-white">Push Notifications</h3>
@@ -284,6 +291,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
                 </div>
               </div>
               <Toggle
+                label="Push notifications"
                 enabled={pushSubscribed || preferences.pushEnabled}
                 onChange={handlePushToggle}
                 disabled={pushLoading}
@@ -302,7 +310,8 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
                     </div>
                   </div>
                   <Toggle
-                    enabled={preferences.streakReminders}
+                    label="Streak reminders"
+              enabled={preferences.streakReminders}
                     onChange={(v) => updatePreference('streakReminders', v)}
                     disabled={isSaving}
                   />
@@ -314,7 +323,7 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
       </div>
 
       {/* Marketing Section */}
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <EnvelopeIcon className="w-5 h-5 text-white/30" />
@@ -324,7 +333,8 @@ export function NotificationSettings({ className = '' }: NotificationSettingsPro
             </div>
           </div>
           <Toggle
-            enabled={preferences.marketingEmails}
+            label="Marketing emails"
+              enabled={preferences.marketingEmails}
             onChange={(v) => updatePreference('marketingEmails', v)}
             disabled={isSaving}
           />

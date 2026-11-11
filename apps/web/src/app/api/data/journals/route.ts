@@ -1,3 +1,4 @@
+import { saveOwnedRecords, RecordConflictError, InvalidRecordError, requireOwnedReferences } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -10,8 +11,7 @@ import type { TradeJournal } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -59,8 +59,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -116,22 +115,14 @@ export async function POST(request: NextRequest) {
       metadata: {},
     }));
 
-    const { error } = await supabase
-      .from('trade_journals')
-      .upsert(dbJournals, {
-        onConflict: 'id',
-      });
-
-    if (error) {
-      console.error('Error saving journals:', error);
-      return NextResponse.json(
-        { error: 'Failed to save journals' },
-        { status: 500 }
-      );
-    }
+    await requireOwnedReferences(supabase, 'trades', userId, journals.map((journal: TradeJournal) => journal.tradeId));
+    await saveOwnedRecords(supabase, 'trade_journals', userId, dbJournals);
 
     return NextResponse.json({ success: true, count: journals.length });
   } catch (error: any) {
+    if (error instanceof RecordConflictError || error instanceof InvalidRecordError) {
+      return NextResponse.json({ error: error.message }, { status: error instanceof RecordConflictError ? 409 : 400 });
+    }
     console.error('Error in POST /api/data/journals:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },

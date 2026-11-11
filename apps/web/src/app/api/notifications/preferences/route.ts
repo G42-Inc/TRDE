@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
 import type { NotificationPreferences, NotificationPreferencesInput } from '@/lib/engagement/types';
+import { NotificationPreferencesSchema } from '@/lib/validation/preferences';
 
 /**
  * GET /api/notifications/preferences
@@ -88,7 +89,9 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const body: NotificationPreferencesInput = await request.json();
+    const parsed = NotificationPreferencesSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return NextResponse.json({ error: 'Invalid notification preferences' }, { status: 400 });
+    const body: NotificationPreferencesInput = parsed.data;
     const supabase = getSupabaseServiceClient();
 
     // Build update object (only include provided fields)
@@ -124,7 +127,6 @@ export async function PUT(request: NextRequest) {
       .upsert({
         user_id: userId,
         ...updateData,
-        created_at: new Date().toISOString(),
       }, {
         onConflict: 'user_id',
       })

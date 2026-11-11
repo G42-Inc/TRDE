@@ -1,3 +1,4 @@
+import { getEdgeAccountScope, isCurrentEdgeAccount, type EdgeAccountScope } from '../../store/accountScope';
 // Export simulated trades to TRDE journal
 
 import type { SimTradeClosed } from './types';
@@ -51,7 +52,9 @@ function getDefaultTickInfo(instrument: FuturesInstrument): { tickSize: number; 
     [FuturesInstrument.MGC]: { tickSize: 0.1, tickValueUsd: 1.0 },
   };
   
-  return defaults[instrument] || { tickSize: 0.25, tickValueUsd: 12.5 }; // Default to ES values
+  const info = defaults[instrument];
+  if (!info) throw new Error(`Tick specifications for ${instrument} are not supported for simulation export.`);
+  return info;
 }
 
 /**
@@ -77,7 +80,8 @@ export function simTradeToTrdeFormData(trade: SimTradeClosed): {
   const exitDate = new Date(trade.exitTimeUtc);
   
   const symbol = extractSymbol(trade.contractId);
-  const instrumentRoot = mapSymbolToInstrument(symbol) || FuturesInstrument.ES;
+  const instrumentRoot = mapSymbolToInstrument(symbol);
+  if (!instrumentRoot) throw new Error(`Instrument ${symbol} is not supported for simulation export.`);
   
   const outcome = trade.netUsd > 0.01 ? Outcome.WIN 
     : trade.netUsd < -0.01 ? Outcome.LOSS 
@@ -113,20 +117,28 @@ export function simTradeToTrdeFormData(trade: SimTradeClosed): {
 /**
  * Store simulated trades for import into TRDE journal (legacy - redirects to direct save)
  */
-export function storeSimTradesForImport(trades: SimTradeClosed[]): void {
-  // Now directly save to journal instead of storing for import
-  saveSimTradesToJournal(trades);
+export function storeSimTradesForImport(trades: SimTradeClosed[]): Promise<number> {
+  return saveSimTradesToJournal(trades);
 }
 
 /**
  * Directly save simulated trades to TRDE journal with EDGE tag
  */
-export async function saveSimTradesToJournal(trades: SimTradeClosed[]): Promise<void> {
-  if (typeof window === 'undefined') return;
-  if (trades.length === 0) return;
+export async function saveSimTradesToJournal(trades: SimTradeClosed[], scope: EdgeAccountScope | null = getEdgeAccountScope()): Promise<number> {
+  if (!isCurrentEdgeAccount(scope)) return 0;
+  if (typeof window === 'undefined') return 0;
+  if (trades.length === 0) return 0;
+
+  // Validate the complete batch before writing a collection or any journal rows.
+  for (const trade of trades) {
+    const instrument = mapSymbolToInstrument(extractSymbol(trade.contractId));
+    if (!instrument) throw new Error('This instrument is not supported for simulation export.');
+    getDefaultTickInfo(instrument);
+  }
 
   // Get or create EDGE collection
   const collections = await cloudStorage.getCollections();
+  if (!isCurrentEdgeAccount(scope)) return 0;
   let edgeCollection = collections.find((c) => c.name === 'EDGE');
   
   if (!edgeCollection) {
@@ -139,11 +151,14 @@ export async function saveSimTradesToJournal(trades: SimTradeClosed[]): Promise<
       // Note: Collection type doesn't have updatedAt, but database stores it
     };
     await cloudStorage.saveCollections([...collections, edgeCollection]);
+    if (!isCurrentEdgeAccount(scope)) return 0;
   }
 
   // Always get the latest trades to ensure we have the most up-to-date list for duplicate detection
   const existingTrades = await cloudStorage.getTrades();
+  if (!isCurrentEdgeAccount(scope)) return 0;
   const riskRules = await cloudStorage.getRiskRules();
+  if (!isCurrentEdgeAccount(scope)) return 0;
   const now = Date.now();
   
   // Create a set of existing Sim Trade IDs from notes to prevent duplicates
@@ -207,7 +222,8 @@ export async function saveSimTradesToJournal(trades: SimTradeClosed[]): Promise<
     const exitDate = new Date(simTrade.exitTimeUtc);
     
     const symbol = extractSymbol(simTrade.contractId);
-    const instrumentRoot = mapSymbolToInstrument(symbol) || FuturesInstrument.ES;
+    const instrumentRoot = mapSymbolToInstrument(symbol);
+  if (!instrumentRoot) throw new Error(`Instrument ${symbol} is not supported for simulation export.`);
     
     const direction = simTrade.direction === 'LONG' ? Direction.LONG : Direction.SHORT;
     
@@ -221,24 +237,22 @@ export async function saveSimTradesToJournal(trades: SimTradeClosed[]): Promise<
       ? (simTrade.exitPrice - simTrade.entryPrice) * simTrade.qty
       : (simTrade.entryPrice - simTrade.exitPrice) * simTrade.qty;
     
-    // Calculate resultR (using planned risk - default to fees if no risk planned)
-    const plannedRiskUsd = 100; // Default risk for simulated trades
-    const resultR = simTrade.netUsd / plannedRiskUsd;
+    // Simulation has no planned-risk input; leave R unrated until reviewed.
+    const plannedRiskUsd = 0;
+    const resultR = 0;
     
     const notes = `[EDGE Simulation] ${simTrade.contractName || simTrade.contractId}\n` +
       `Realized: ${simTrade.realizedTicks.toFixed(1)} ticks / $${simTrade.realizedUsd.toFixed(2)}\n` +
       `Fees: $${simTrade.feesUsd.toFixed(2)}\n` +
       `Assumptions: ${simTrade.assumptions.slippageTicks} ticks slippage, $${simTrade.assumptions.commissionPerContractPerSide} commission per contract\n` +
-      `Sim Trade ID: ${simTrade.id}`;
+      `Sim Trade ID: ${simTrade.id}\nPlanned risk not supplied; review this trade to set risk and R.`;
     
     const trade: FuturesTrade = {
-      id: `trade-edge-${simTrade.id}-${now}`,
+      id: `trade-edge-${scope!.userId}-${simTrade.id}`,
       assetClass: AssetClass.FUTURES,
       createdAt: now,
       updatedAt: now,
-      // Use journal submission date for tradeDate (for chronological sorting in list)
-      // But preserve actual entry/exit times for trade details
-      tradeDate: format(new Date(now), 'yyyy-MM-dd'),
+      tradeDate: format(entryDate, 'yyyy-MM-dd'),
       entryTime: entryDate.getTime(),
       exitTime: exitDate.getTime(),
       direction,
@@ -291,6 +305,7 @@ export async function saveSimTradesToJournal(trades: SimTradeClosed[]): Promise<
   if (newTrades.length > 0) {
     // Get the latest trades again right before saving to ensure no race conditions
     const latestTrades = await cloudStorage.getTrades();
+    if (!isCurrentEdgeAccount(scope)) return 0;
     
     // Build signatures for latest trades
     const latestSignatures = new Set<string>();
@@ -334,6 +349,8 @@ export async function saveSimTradesToJournal(trades: SimTradeClosed[]): Promise<
     
     if (finalNewTrades.length > 0) {
       await cloudStorage.saveTrades([...latestTrades, ...finalNewTrades]);
+      return finalNewTrades.length;
     }
   }
+  return 0;
 }

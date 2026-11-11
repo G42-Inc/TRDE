@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useId } from 'react';
+import { ModalDialog } from '@/components/ModalDialog';
 import { useAppData } from '@/hooks/useAppData';
+import { calculateHourlyPerformance, calculateStreaks, filterPerformanceTrades } from '@/lib/trades/performance';
 import { calculateAllMetrics, METRIC_EXPLAINERS } from '@trde/core';
 import type { Trade } from '@trde/core';
 import { MetricCard } from '@/components/MetricCard';
@@ -10,7 +12,7 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { Outcome } from '@trde/core';
 import Link from 'next/link';
 import { InformationCircleIcon, ChartBarIcon, XMarkIcon } from '@heroicons/react/24/outline';
-import { format, parseISO, subDays } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { useTheme } from '@/contexts/ThemeContext';
 import { SkeletonLoader } from '@/components/SkeletonLoader';
 
@@ -21,7 +23,7 @@ interface MetricChartData {
 
 export default function AnalyticsPage() {
   const { theme } = useTheme();
-  const { trades, isLoading } = useAppData();
+  const { trades, collections, isLoading } = useAppData();
   const [mounted, setMounted] = useState(false);
   const [dateRange, setDateRange] = useState<'all' | '30' | '90' | '180'>('all');
   const [showChartFor, setShowChartFor] = useState<Record<string, boolean>>({});
@@ -56,17 +58,10 @@ export default function AnalyticsPage() {
   const tooltipText = isDark ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.9)';
 
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
-    
-    return () => {
-      clearTimeout(timer);
-    };
+    setMounted(true);
   }, []);
 
-  if (!mounted) {
+  if (!mounted || isLoading) {
     return (
       <div className="space-y-6">
         <SkeletonLoader width="200px" height="2rem" />
@@ -87,26 +82,11 @@ export default function AnalyticsPage() {
     );
   }
 
-  // Get collections to check for EDGE trades (not yet supported in demo)
-  const collections: { id: string; name: string }[] = [];
   const edgeCollection = collections.find((c) => c.name === 'EDGE');
 
-  // Filter trades based on date range and EDGE toggle
-  let filteredTrades = dateRange === 'all' 
-    ? trades 
-    : trades.filter(t => {
-        const tradeDate = parseISO(t.tradeDate);
-        const cutoffDate = subDays(new Date(), parseInt(dateRange));
-        return tradeDate >= cutoffDate;
-      });
-
-  // Filter for EDGE trades if toggle is on
-  if (showEdgeStats) {
-    filteredTrades = filteredTrades.filter((t) => 
-      (edgeCollection && t.collections.includes(edgeCollection.id)) ||
-      t.notes?.startsWith('[EDGE')
-    );
-  }
+  const filteredTrades = filterPerformanceTrades(
+    trades, dateRange === 'all' ? null : Number(dateRange), showEdgeStats, edgeCollection?.id,
+  );
 
   const metrics = calculateAllMetrics(filteredTrades);
 
@@ -132,10 +112,10 @@ export default function AnalyticsPage() {
           break;
       }
       
-      timeframeFilteredTrades = filteredTrades.filter(t => parseISO(t.tradeDate) >= cutoffDate);
+      timeframeFilteredTrades = filteredTrades.filter(t => t.entryTime >= cutoffDate.getTime());
     }
     
-    const sortedTrades = timeframeFilteredTrades.sort((a, b) => parseISO(a.tradeDate).getTime() - parseISO(b.tradeDate).getTime());
+    const sortedTrades = [...timeframeFilteredTrades].sort((a, b) => a.entryTime - b.entryTime);
     
     switch (selectedChart) {
       case 'rollingExpectancy': {
@@ -309,7 +289,7 @@ export default function AnalyticsPage() {
 
   // Generate time-series data for each metric
   const generateTimeSeriesData = (metricKey: string): MetricChartData[] => {
-    const sortedTrades = [...filteredTrades].sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
+    const sortedTrades = [...filteredTrades].sort((a, b) => a.entryTime - b.entryTime);
     const data: MetricChartData[] = [];
     
     for (let i = 1; i <= sortedTrades.length; i++) {
@@ -417,7 +397,7 @@ export default function AnalyticsPage() {
 
   // Calculate equity curve data with moving average (both R and USD)
   const equityCurveData = (() => {
-    const sortedTrades = filteredTrades.sort((a, b) => parseISO(a.tradeDate).getTime() - parseISO(b.tradeDate).getTime());
+    const sortedTrades = [...filteredTrades].sort((a, b) => a.entryTime - b.entryTime);
     
     // Filter trades based on timeframe if date view is selected
     let timeframeFilteredTrades = sortedTrades;
@@ -442,7 +422,7 @@ export default function AnalyticsPage() {
       }
       
       if (dateTimeframe !== 'all') {
-        timeframeFilteredTrades = sortedTrades.filter(t => parseISO(t.tradeDate) >= cutoffDate);
+        timeframeFilteredTrades = sortedTrades.filter(t => t.entryTime >= cutoffDate.getTime());
       }
     }
     
@@ -539,7 +519,7 @@ export default function AnalyticsPage() {
 
   const dayOfWeekData = Object.entries(metrics.dayOfWeekPerformance).map(([day, data]) => ({
     day: day.slice(0, 3),
-    pnl: data.pnl,
+    pnl: data.r,
     count: data.count,
   }));
 
@@ -548,29 +528,11 @@ export default function AnalyticsPage() {
     if (filteredTrades.length === 0) return null;
     
     const sortedTrades = [...filteredTrades].sort((a, b) => 
-      parseISO(a.tradeDate).getTime() - parseISO(b.tradeDate).getTime()
+      a.entryTime - b.entryTime
     );
     
-    // Streak Analysis
-    let currentWinStreak = 0;
-    let currentLossStreak = 0;
-    let maxWinStreak = 0;
-    let maxLossStreak = 0;
-    let streakHistory: { trade: number; winStreak: number; lossStreak: number }[] = [];
-    
-    sortedTrades.forEach((trade, idx) => {
-      if (trade.outcome === Outcome.WIN) {
-        currentWinStreak++;
-        currentLossStreak = 0;
-        maxWinStreak = Math.max(maxWinStreak, currentWinStreak);
-      } else {
-        currentLossStreak++;
-        currentWinStreak = 0;
-        maxLossStreak = Math.max(maxLossStreak, currentLossStreak);
-      }
-      streakHistory.push({ trade: idx + 1, winStreak: currentWinStreak, lossStreak: -currentLossStreak });
-    });
-    
+    const { maxWinStreak, maxLossStreak, streakHistory, avgConsecutiveWins, avgConsecutiveLosses } = calculateStreaks(sortedTrades);
+
     // Monthly Performance
     const monthlyPerf = new Map<string, { pnl: number; r: number; wins: number; losses: number; trades: number }>();
     sortedTrades.forEach(trade => {
@@ -580,7 +542,7 @@ export default function AnalyticsPage() {
       existing.r += trade.resultR;
       existing.trades++;
       if (trade.outcome === Outcome.WIN) existing.wins++;
-      else existing.losses++;
+      else if (trade.outcome === Outcome.LOSS) existing.losses++;
       monthlyPerf.set(month, existing);
     });
     
@@ -594,30 +556,8 @@ export default function AnalyticsPage() {
       losses: data.losses,
     }));
     
-    // Hourly Performance (by entry hour)
-    const hourlyPerf = new Map<number, { pnl: number; r: number; count: number; wins: number }>();
-    sortedTrades.forEach(trade => {
-      const hour = parseISO(trade.tradeDate).getHours();
-      const existing = hourlyPerf.get(hour) || { pnl: 0, r: 0, count: 0, wins: 0 };
-      existing.pnl += trade.resultUsd;
-      existing.r += trade.resultR;
-      existing.count++;
-      if (trade.outcome === Outcome.WIN) existing.wins++;
-      hourlyPerf.set(hour, existing);
-    });
-    
-    const hourlyData = Array.from({ length: 24 }, (_, hour) => {
-      const data = hourlyPerf.get(hour) || { pnl: 0, r: 0, count: 0, wins: 0 };
-      return {
-        hour: `${hour.toString().padStart(2, '0')}:00`,
-        hourNum: hour,
-        pnl: Number(data.pnl.toFixed(2)),
-        r: Number(data.r.toFixed(2)),
-        count: data.count,
-        winRate: data.count > 0 ? Number(((data.wins / data.count) * 100).toFixed(1)) : 0,
-      };
-    }).filter(d => d.count > 0);
-    
+    const hourlyData = calculateHourlyPerformance(sortedTrades);
+
     // Drawdown Analysis
     let peak = 0;
     let drawdownData: { trade: number; equity: number; drawdown: number; drawdownPct: number }[] = [];
@@ -664,34 +604,12 @@ export default function AnalyticsPage() {
         if (absR < 1) { winsBySize.small += trade.resultR; winsBySize.smallCount++; }
         else if (absR < 2) { winsBySize.medium += trade.resultR; winsBySize.mediumCount++; }
         else { winsBySize.large += trade.resultR; winsBySize.largeCount++; }
-      } else {
+      } else if (trade.outcome === Outcome.LOSS) {
         if (absR < 1) { lossesBySize.small += trade.resultR; lossesBySize.smallCount++; }
         else if (absR < 2) { lossesBySize.medium += trade.resultR; lossesBySize.mediumCount++; }
         else { lossesBySize.large += trade.resultR; lossesBySize.largeCount++; }
       }
     });
-    
-    // Consecutive analysis
-    let consecutiveWins: number[] = [];
-    let consecutiveLosses: number[] = [];
-    let tempWin = 0, tempLoss = 0;
-    
-    sortedTrades.forEach(trade => {
-      if (trade.outcome === Outcome.WIN) {
-        tempWin++;
-        if (tempLoss > 0) { consecutiveLosses.push(tempLoss); tempLoss = 0; }
-      } else {
-        tempLoss++;
-        if (tempWin > 0) { consecutiveWins.push(tempWin); tempWin = 0; }
-      }
-    });
-    if (tempWin > 0) consecutiveWins.push(tempWin);
-    if (tempLoss > 0) consecutiveLosses.push(tempLoss);
-    
-    const avgConsecutiveWins = consecutiveWins.length > 0 
-      ? consecutiveWins.reduce((a, b) => a + b, 0) / consecutiveWins.length : 0;
-    const avgConsecutiveLosses = consecutiveLosses.length > 0 
-      ? consecutiveLosses.reduce((a, b) => a + b, 0) / consecutiveLosses.length : 0;
     
     // Profit/Loss ratio over time
     const plRatioOverTime = sortedTrades.map((_, idx) => {
@@ -755,7 +673,7 @@ export default function AnalyticsPage() {
   return (
     <div className="container-premium">
       {/* Premium header */}
-      <div className="flex items-center justify-between animate-slide-in-down" style={{ marginBottom: 'var(--space-2xl)' }}>
+      <div className="flex flex-wrap items-center justify-between gap-4 animate-slide-in-down" style={{ marginBottom: 'var(--space-2xl)' }}>
         <div>
           <h1 className="theme-text text-h1">Analytics</h1>
           <p className="theme-text-secondary text-body" style={{ marginTop: 'var(--space-sm)' }}>
@@ -773,7 +691,7 @@ export default function AnalyticsPage() {
 
       {/* Filters - Premium controls */}
       <div className="flex items-center animate-slide-in-up" style={{ gap: 'var(--space-lg)', marginBottom: 'var(--space-xl)' }}>
-        <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
+        <div className="flex flex-wrap items-center" style={{ gap: 'var(--space-md)' }}>
           <span className="theme-text-secondary text-body-sm font-medium">Time Period:</span>
           <select
             value={dateRange}
@@ -789,9 +707,10 @@ export default function AnalyticsPage() {
         </div>
         
         {/* EDGE Stats Toggle - Premium styling */}
-        <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
+        <div className="flex flex-wrap items-center" style={{ gap: 'var(--space-md)' }}>
           <span className="theme-text-secondary text-body-sm font-medium">Show EDGE Stats:</span>
           <button
+            role="switch" aria-label="Show EDGE Stats" aria-checked={showEdgeStats}
             onClick={() => setShowEdgeStats(!showEdgeStats)}
             className={`relative inline-flex items-center transition-all focus:outline-none focus:ring-2 active:scale-95 ${
               showEdgeStats
@@ -821,7 +740,7 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Metric Cards with Chart Toggle */}
-      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))' }}>
         <MetricCardWithChart
           metricId="winRate"
           label="Win Rate"
@@ -982,8 +901,8 @@ export default function AnalyticsPage() {
       )}
 
       {/* Premium Charts Grid */}
-      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))' }}>
-        <div className="card-premium hover-lift">
+      <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 500px), 1fr))' }}>
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
           <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>R-Multiple Distribution</h2>
           <ResponsiveContainer key={`rDist-${theme}`} width="100%" height={300}>
             <BarChart data={rDistData}>
@@ -1020,10 +939,10 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </div>
 
-        <div className="card-premium hover-lift">
-          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-lg)' }}>
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
+          <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: 'var(--space-lg)' }}>
             <h2 className="theme-text text-h3">Equity Curve</h2>
-            <div className="flex items-center space-x-6">
+            <div className="flex flex-wrap items-center gap-3">
               {/* X-Axis Toggle */}
               <div className="flex items-center space-x-2">
                 <button
@@ -1093,12 +1012,12 @@ export default function AnalyticsPage() {
                 </div>
               )}
               {/* Y-Axis Toggle */}
-              <div className="flex items-center space-x-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <span className={`text-sm font-medium ${equityView === 'R' ? 'text-accent' : 'theme-text-secondary'}`}>
                   R
                 </span>
                 <button
-                  onClick={() => setEquityView(equityView === 'R' ? 'USD' : 'R')}
+                  aria-label="Show equity in dollars" role="switch" aria-checked={equityView === 'USD'} onClick={() => setEquityView(equityView === 'R' ? 'USD' : 'R')}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors active:scale-95 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-black ${
                     equityView === 'USD' ? 'bg-accent' : 'theme-bg-tertiary'
                   }`}
@@ -1284,7 +1203,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Drawdown Chart */}
-        <div className="card-premium hover-lift">
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
           <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Drawdown Analysis</h2>
           {advancedStats && advancedStats.drawdownData.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
@@ -1325,10 +1244,10 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Dynamic Analytics Chart */}
-        <div className="card-premium hover-lift">
-          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-lg)' }}>
+        <div className="card-premium min-w-0 overflow-hidden hover-lift">
+          <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: 'var(--space-lg)' }}>
             <h2 className="theme-text text-h3">{getChartTitle()}</h2>
-            <div className="flex items-center space-x-3">
+            <div className="flex flex-wrap items-center gap-3">
               {/* Timeframe Selector (only shown for line charts) */}
               {getChartConfig().type === 'line' && (
                 <div className="flex items-center space-x-1">
@@ -1377,7 +1296,7 @@ export default function AnalyticsPage() {
               <select
                 value={selectedChart}
                 onChange={(e) => setSelectedChart(e.target.value as typeof selectedChart)}
-                className="px-3 py-1.5 theme-bg-tertiary border theme-border rounded-lg text-sm theme-text focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 transition-all duration-200"
+                className="max-w-full px-3 py-1.5 theme-bg-tertiary border theme-border rounded-lg text-sm theme-text focus:outline-none focus:ring-2 focus:ring-blue-500 active:scale-95 transition-all duration-200"
               >
                 <option value="rollingExpectancy">Rolling Expectancy</option>
                 <option value="winRate">Rolling Win Rate</option>
@@ -1632,8 +1551,8 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Monthly Performance Chart */}
-          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))', marginTop: 'var(--space-xl)' }}>
-            <div className="card-premium hover-lift">
+          <div className="grid-premium" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 500px), 1fr))', marginTop: 'var(--space-xl)' }}>
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Monthly Performance</h2>
               {advancedStats.monthlyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1685,7 +1604,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Hourly Performance Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Performance by Hour</h2>
               {advancedStats.hourlyData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1720,7 +1639,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Streak History Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Streak History</h2>
               {advancedStats.streakHistory.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1751,7 +1670,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Cumulative Win Rate Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Cumulative Win Rate</h2>
               {advancedStats.winRateOverTime.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1793,7 +1712,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Profit/Loss Ratio Over Time */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Ratio Over Time</h2>
               {advancedStats.plRatioOverTime.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
@@ -1828,7 +1747,7 @@ export default function AnalyticsPage() {
             </div>
 
             {/* Win/Loss Pie Chart */}
-            <div className="card-premium hover-lift">
+            <div className="card-premium min-w-0 overflow-hidden hover-lift">
               <h2 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>Win/Loss Distribution</h2>
               <div className="flex items-center justify-center">
                 <ResponsiveContainer width="100%" height={300}>
@@ -1887,6 +1806,7 @@ function MetricCardWithChart({
   showChart: boolean;
   onToggleChart: () => void;
 }) {
+  const modalTitleId = useId();
   const [showInfoModal, setShowInfoModal] = useState(false);
   const explainer = METRIC_EXPLAINERS[metricId];
 
@@ -1906,7 +1826,7 @@ function MetricCardWithChart({
                 ? 'text-accent bg-accent/10' 
                 : 'theme-text-secondary hover:theme-text'
             }`}
-            title="Toggle chart"
+            aria-label={`Toggle ${label} chart`} title="Toggle chart"
           >
             <ChartBarIcon className="h-4 w-4" />
           </button>
@@ -1918,7 +1838,7 @@ function MetricCardWithChart({
                 setShowInfoModal(true);
               }}
               className="text-accent hover:text-accent dark:hover:text-accent-light transition-colors"
-              title="Info"
+              aria-label={`About ${label}`} title="Info"
             >
               <InformationCircleIcon className="h-4 w-4" />
             </button>
@@ -1944,18 +1864,15 @@ function MetricCardWithChart({
       )}
 
       {showInfoModal && explainer && (
-        <div 
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={() => setShowInfoModal(false)}
-        >
+        <ModalDialog isOpen onClose={() => setShowInfoModal(false)} labelledBy={modalTitleId} className="items-center justify-center">
           <div 
             className="theme-bg-secondary p-6 rounded-xl max-w-lg w-full max-h-[80vh] overflow-y-auto border theme-border shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-4 border-b theme-border pb-4">
-              <h3 className="text-lg font-bold theme-text">{explainer.title}</h3>
+              <h3 id={modalTitleId} className="text-lg font-bold theme-text">{explainer.title}</h3>
               <button
-                onClick={() => setShowInfoModal(false)}
+                aria-label="Close metric details" onClick={() => setShowInfoModal(false)}
                 className="theme-text-secondary hover:theme-text transition-colors"
               >
                 <XMarkIcon className="h-5 w-5" />
@@ -1974,7 +1891,7 @@ function MetricCardWithChart({
               </Link>
             </div>
           </div>
-        </div>
+        </ModalDialog>
       )}
     </div>
   );

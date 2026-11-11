@@ -12,9 +12,22 @@
 
 import { useStorage } from '@/contexts/StorageContext';
 import { useDemo } from '@/contexts/DemoContext';
+import { useCallback } from 'react';
 import type { Trade, Strategy } from '@trde/core';
 
 interface UseAppDataResult {
+  versions: ReturnType<typeof useStorage>['versions'];
+  saveVersions: ReturnType<typeof useStorage>['saveVersions'];
+  collections: ReturnType<typeof useStorage>['collections'];
+  saveCollections: ReturnType<typeof useStorage>['saveCollections'];
+  savedFilters: ReturnType<typeof useStorage>['savedFilters'];
+  saveSavedFilters: ReturnType<typeof useStorage>['saveSavedFilters'];
+  clearAllData: ReturnType<typeof useStorage>['clearAllData'];
+  migrateLocalToCloud: ReturnType<typeof useStorage>['migrateLocalToCloud'];
+  syncError: ReturnType<typeof useStorage>['syncError'];
+  lastSyncTime: ReturnType<typeof useStorage>['lastSyncTime'];
+  needsMigration: ReturnType<typeof useStorage>['needsMigration'];
+
   // Core data
   trades: Trade[];
   strategies: Strategy[];
@@ -62,6 +75,11 @@ interface UseAppDataResult {
 export function useAppData(): UseAppDataResult {
   const storage = useStorage();
   const demo = useDemo();
+  const rejectDemoWrite = useCallback(async (): Promise<never> => {
+    const message = 'Demo mode is read-only. Upgrade to save your own journal data.';
+    demo.showUpgradePrompt('create_journal', message);
+    throw new Error(message);
+  }, [demo.showUpgradePrompt]);
   
   // In demo mode, return sample data for trades and strategies
   // For other data types, demo users see empty (they haven't created any)
@@ -73,6 +91,17 @@ export function useAppData(): UseAppDataResult {
   const journals = demo.isDemo ? [] : storage.journals;
   
   return {
+    versions: demo.isDemo ? [] : storage.versions,
+    saveVersions: demo.isDemo ? rejectDemoWrite : storage.saveVersions,
+    collections: demo.isDemo ? [] : storage.collections,
+    saveCollections: demo.isDemo ? rejectDemoWrite : storage.saveCollections,
+    savedFilters: demo.isDemo ? [] : storage.savedFilters,
+    saveSavedFilters: demo.isDemo ? rejectDemoWrite : storage.saveSavedFilters,
+    clearAllData: demo.isDemo ? rejectDemoWrite : storage.clearAllData,
+    migrateLocalToCloud: demo.isDemo ? rejectDemoWrite : storage.migrateLocalToCloud,
+    syncError: storage.syncError,
+    lastSyncTime: storage.lastSyncTime,
+    needsMigration: storage.needsMigration,
     // Core data - uses demo data when in demo mode
     trades,
     strategies,
@@ -86,8 +115,8 @@ export function useAppData(): UseAppDataResult {
     isSyncing: storage.isSyncing,
     
     // Save functions (will be blocked by API for demo users anyway)
-    saveTrades: storage.saveTrades,
-    saveStrategies: storage.saveStrategies,
+    saveTrades: demo.isDemo ? rejectDemoWrite : storage.saveTrades,
+    saveStrategies: demo.isDemo ? rejectDemoWrite : storage.saveStrategies,
     
     // Other data (empty for demo users)
     journals,
@@ -100,13 +129,13 @@ export function useAppData(): UseAppDataResult {
     dashboardMetrics: storage.dashboardMetrics,
     
     // Save functions
-    saveJournals: storage.saveJournals,
-    saveWeeklyReviews: storage.saveWeeklyReviews,
-    saveRiskRules: storage.saveRiskRules,
-    saveDailyBiases: storage.saveDailyBiases,
-    saveQuickJournals: storage.saveQuickJournals,
-    saveTodos: storage.saveTodos,
-    saveRuleViolations: storage.saveRuleViolations,
+    saveJournals: demo.isDemo ? rejectDemoWrite : storage.saveJournals,
+    saveWeeklyReviews: demo.isDemo ? rejectDemoWrite : storage.saveWeeklyReviews,
+    saveRiskRules: demo.isDemo ? rejectDemoWrite : storage.saveRiskRules,
+    saveDailyBiases: demo.isDemo ? rejectDemoWrite : storage.saveDailyBiases,
+    saveQuickJournals: demo.isDemo ? rejectDemoWrite : storage.saveQuickJournals,
+    saveTodos: demo.isDemo ? rejectDemoWrite : storage.saveTodos,
+    saveRuleViolations: demo.isDemo ? rejectDemoWrite : storage.saveRuleViolations,
     saveDashboardMetrics: storage.saveDashboardMetrics,
     
     // Sync functions

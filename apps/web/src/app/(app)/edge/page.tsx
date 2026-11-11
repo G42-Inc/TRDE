@@ -60,25 +60,20 @@ export default function EdgePage() {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setMounted(true);
-      checkConnection();
-    }, 100);
-    
-    const interval = setInterval(() => {
-      if (mounted) {
-        setSyncState(getSyncState());
-        const latestTrades = getTrades();
-        setTrades(latestTrades);
-        setMetrics(calculateEdgeMetrics(latestTrades));
-      }
-    }, 1000);
-    
-    return () => {
-      clearTimeout(timer);
-      clearInterval(interval);
+    setMounted(true);
+    checkConnection();
+    const refresh = () => {
+      if (document.hidden) return;
+      setSyncState(getSyncState());
+      const latestTrades = getTrades();
+      setTrades(latestTrades);
+      setMetrics(calculateEdgeMetrics(latestTrades));
     };
-  }, [mounted, checkConnection]);
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
+    return () => { clearInterval(interval); window.removeEventListener('focus', refresh); };
+  }, [checkConnection]);
 
   // Chart data calculations
   const chartData = useMemo(() => {
@@ -299,7 +294,7 @@ export default function EdgePage() {
   return (
     <div className="container-premium">
       {/* Premium Header */}
-      <div className="flex items-center justify-between animate-slide-in-down" style={{ marginBottom: 'var(--space-3xl)' }}>
+      <div className="flex flex-wrap items-center justify-between gap-4 animate-slide-in-down" style={{ marginBottom: 'var(--space-3xl)' }}>
         <div className="flex items-center" style={{ gap: 'var(--space-lg)' }}>
           <div className="rounded-2xl bg-gradient-to-br from-blue-600 via-purple-600 to-indigo-700" style={{ padding: 'var(--space-md)', boxShadow: 'var(--shadow-lg)' }}>
             <ChartBarIcon className="h-8 w-8 text-white" />
@@ -334,7 +329,7 @@ export default function EdgePage() {
       {metrics.totalTrades > 0 && (
         <>
           <div className="section-premium animate-slide-in-up">
-            <div className="flex items-center justify-between" style={{ marginBottom: 'var(--space-2xl)' }}>
+            <div className="flex flex-wrap items-center justify-between gap-3" style={{ marginBottom: 'var(--space-2xl)' }}>
               <h2 className="theme-text text-h2">Your Trading Performance</h2>
               {syncState && (
                 <div className="theme-bg-tertiary" style={{ padding: 'var(--space-md) var(--space-lg)', borderRadius: 'var(--radius-xl)' }}>
@@ -423,7 +418,7 @@ export default function EdgePage() {
           {chartData && (
             <div className="space-y-8 animate-slide-in-up" style={{ marginTop: 'var(--space-3xl)' }}>
               {/* Equity Curve */}
-              <div className="card-premium hover-lift">
+              <div className="card-premium min-w-0 hover-lift">
                 <h3 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
                   Cumulative P&L
                 </h3>
@@ -469,7 +464,7 @@ export default function EdgePage() {
               {/* Daily P&L and Win/Loss Distribution */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Daily P&L */}
-                <div className="card-premium hover-lift">
+                <div className="card-premium min-w-0 hover-lift">
                   <h3 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
                     Daily Performance
                   </h3>
@@ -515,7 +510,7 @@ export default function EdgePage() {
                 </div>
 
                 {/* Win/Loss Distribution */}
-                <div className="card-premium hover-lift">
+                <div className="card-premium min-w-0 hover-lift">
                   <h3 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
                     Win/Loss Distribution
                   </h3>
@@ -559,7 +554,7 @@ export default function EdgePage() {
               </div>
 
               {/* P&L Distribution Histogram */}
-              <div className="card-premium hover-lift">
+              <div className="card-premium min-w-0 hover-lift">
                 <h3 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
                   P&L Distribution
                 </h3>
@@ -597,7 +592,7 @@ export default function EdgePage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Hourly Performance */}
                 {chartData.hourlyData.length > 0 && (
-                  <div className="card-premium hover-lift">
+                  <div className="card-premium min-w-0 hover-lift">
                     <h3 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
                       Performance by Hour
                     </h3>
@@ -637,7 +632,7 @@ export default function EdgePage() {
                 )}
 
                 {/* Drawdown Chart */}
-                <div className="card-premium hover-lift">
+                <div className="card-premium min-w-0 hover-lift">
                   <h3 className="theme-text text-h3" style={{ marginBottom: 'var(--space-lg)' }}>
                     Drawdown Analysis
                   </h3>

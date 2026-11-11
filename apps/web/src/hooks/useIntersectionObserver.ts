@@ -17,7 +17,7 @@ interface UseIntersectionObserverOptions {
 
 interface UseIntersectionObserverResult {
   /** Ref to attach to target element */
-  ref: React.RefObject<HTMLDivElement>;
+  ref: React.RefObject<HTMLDivElement | null>;
   /** Whether element is currently visible */
   isVisible: boolean;
   /** Whether element has ever been visible */

@@ -1,9 +1,17 @@
+// Clerk publishable keys encode the public Frontend API host. Include that exact
+// host so development instances and future custom Clerk domains both work.
+function clerkFrontendOrigin() {
+  const encoded = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.replace(/^pk_(test|live)_/, '');
+  if (!encoded) return '';
+  const host = Buffer.from(encoded, 'base64').toString('utf8').replace(/\$$/, '');
+  return /^[a-z0-9.-]+$/i.test(host) ? `https://${host}` : '';
+}
+const clerkOrigin = clerkFrontendOrigin();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@trde/core', '@trde/mock-db', '@trde/ui-tokens'],
-  // Optimize production bundle size
-  swcMinify: true,
   // Optimize images
   images: {
     formats: ['image/avif', 'image/webp'],
@@ -68,13 +76,13 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.dev https://js.stripe.com https://*.stripe.com", // unsafe-eval for Next.js, unsafe-inline for theme, Clerk/Stripe domains
+              `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${clerkOrigin} https://*.clerk.accounts.dev https://*.clerk.dev https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com https://*.stripe.com`,
               "worker-src 'self' blob: https://*.clerk.accounts.dev https://*.clerk.dev", // Required for Clerk web workers and service worker
               "style-src 'self' 'unsafe-inline'", // unsafe-inline for Tailwind and inline styles
               "img-src 'self' data: blob: https:",
               "font-src 'self' data:",
-              "connect-src 'self' https://*.supabase.co https://*.clerk.accounts.dev https://*.clerk.dev https://clerk-telemetry.com https://api.stripe.com https://*.stripe.com",
-              "frame-src 'self' https://*.clerk.accounts.dev https://*.clerk.dev https://js.stripe.com",
+              `connect-src 'self' ${clerkOrigin} https://*.supabase.co https://*.clerk.accounts.dev https://*.clerk.dev https://clerk-telemetry.com https://*.protect.clerk.com https://api.stripe.com https://*.stripe.com`,
+              `frame-src 'self' ${clerkOrigin} https://*.clerk.accounts.dev https://*.clerk.dev https://challenges.cloudflare.com https://*.protect.clerk.com https://js.stripe.com`,
               "object-src 'none'",
               "base-uri 'self'",
               "form-action 'self'",

@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react';
 import { useAppData } from '@/hooks/useAppData';
-import { useRouter } from 'next/navigation';
 import { format, parseISO } from 'date-fns';
 import { AssetClass, Outcome } from '@trde/core';
 import type { Trade } from '@trde/core';
@@ -21,12 +20,11 @@ interface TimelineItem {
   type: 'trade';
   timestamp: number;
   date: string;
-  data: any;
+  data: Trade;
 }
 
 export default function TradeHubTimeline() {
-  const { trades } = useAppData();
-  const router = useRouter();
+  const { trades, isLoading } = useAppData();
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
   // Build timeline from trades
@@ -38,7 +36,7 @@ export default function TradeHubTimeline() {
       items.push({
         id: `trade-${trade.id}`,
         type: 'trade',
-        timestamp: trade.createdAt,
+        timestamp: trade.entryTime,
         date: trade.tradeDate,
         data: trade,
       });
@@ -58,7 +56,7 @@ export default function TradeHubTimeline() {
     const groups: Record<string, TimelineItem[]> = {};
 
     timelineItems.forEach((item) => {
-      const dateKey = format(new Date(item.timestamp), 'yyyy-MM-dd');
+      const dateKey = item.date;
       if (!groups[dateKey]) {
         groups[dateKey] = [];
       }
@@ -86,10 +84,10 @@ export default function TradeHubTimeline() {
     const isWin = trade.outcome === Outcome.WIN;
 
     return (
-      <div
+      <Link
         key={`trade-${trade.id}`}
-        onClick={() => router.push(`/trades/${trade.id}`)}
-        className="card-premium hover-lift cursor-pointer"
+        href={`/trades/${trade.id}`}
+        className="block card-premium hover-lift cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
         style={{ padding: 'var(--space-lg)' }}
       >
         <div className="flex items-start" style={{ gap: 'var(--space-lg)' }}>
@@ -99,8 +97,8 @@ export default function TradeHubTimeline() {
           </div>
 
           {/* Content */}
-          <div className="flex-1">
-            <div className="flex items-start justify-between" style={{ marginBottom: 'var(--space-sm)' }}>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start justify-between gap-3" style={{ marginBottom: 'var(--space-sm)' }}>
               <div>
                 <div className="flex items-center" style={{ gap: 'var(--space-md)', marginBottom: 'var(--space-xs)' }}>
                   <h3 className="theme-text text-h3">{symbol}</h3>
@@ -119,7 +117,7 @@ export default function TradeHubTimeline() {
                   <span className={`status-dot ${isWin ? 'success' : 'error'}`} />
                 </div>
                 <p className="theme-text-secondary text-body-sm">
-                  {trade.assetClass === AssetClass.FUTURES ? 'Futures' : 'Options'} • {format(parseISO(trade.tradeDate), 'h:mm a')}
+                  {trade.assetClass === AssetClass.FUTURES ? 'Futures' : 'Options'} • {format(new Date(trade.entryTime), 'h:mm a')}
                 </p>
               </div>
 
@@ -128,7 +126,7 @@ export default function TradeHubTimeline() {
                   {trade.resultR >= 0 ? '+' : ''}{trade.resultR.toFixed(2)}R
                 </div>
                 <div className="theme-text-secondary text-body-sm">
-                  {trade.resultUsd >= 0 ? '+' : ''}${Math.abs(trade.resultUsd).toFixed(0)}
+                  {trade.resultUsd >= 0 ? '+' : '-'}${Math.abs(trade.resultUsd).toFixed(2)}
                 </div>
               </div>
             </div>
@@ -165,14 +163,14 @@ export default function TradeHubTimeline() {
             )}
           </div>
         </div>
-      </div>
+      </Link>
     );
   };
 
   return (
     <div className="container-premium">
       {/* Premium Header */}
-      <div className="flex items-center justify-between animate-slide-in-down" style={{ marginBottom: 'var(--space-3xl)' }}>
+      <div className="flex flex-wrap items-center justify-between gap-4 animate-slide-in-down" style={{ marginBottom: 'var(--space-3xl)' }}>
         <div>
           <h1 className="theme-text text-h1">Timeline</h1>
           <p className="theme-text-secondary text-body" style={{ marginTop: 'var(--space-sm)' }}>
@@ -181,7 +179,7 @@ export default function TradeHubTimeline() {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center" style={{ gap: 'var(--space-md)' }}>
+        <div className="flex flex-wrap items-center gap-3">
           {/* View Toggle */}
           <div className="flex items-center p-1 theme-bg-secondary rounded-xl border theme-border">
             <Link
@@ -212,7 +210,7 @@ export default function TradeHubTimeline() {
       </div>
 
       {/* Timeline */}
-      {timelineItems.length === 0 ? (
+      {isLoading ? (<p role="status" className="theme-text-secondary py-12">Loading trades…</p>) : timelineItems.length === 0 ? (
         <div className="card-premium text-center" style={{ padding: 'var(--space-4xl)' }}>
           <CalendarIcon className="h-16 w-16 theme-text-tertiary mx-auto" style={{ marginBottom: 'var(--space-lg)' }} />
           <h3 className="theme-text text-h3" style={{ marginBottom: 'var(--space-sm)' }}>No Trades Yet</h3>
@@ -228,7 +226,7 @@ export default function TradeHubTimeline() {
               <div className="sticky top-0 z-10 flex items-center" style={{ marginBottom: 'var(--space-lg)', padding: 'var(--space-md) var(--space-lg)', background: 'var(--theme-bg-secondary)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--theme-border)', backdropFilter: 'blur(20px)' }}>
                 <CalendarIcon className="h-5 w-5 theme-text-secondary" style={{ marginRight: 'var(--space-md)' }} />
                 <span className="theme-text font-bold text-body-lg">
-                  {format(new Date(dateKey), 'EEEE, MMMM d, yyyy')}
+                  {format(parseISO(dateKey), 'EEEE, MMMM d, yyyy')}
                 </span>
                 <span className="theme-text-tertiary text-caption" style={{ marginLeft: 'var(--space-md)' }}>
                   {groupedItems[dateKey].length} {groupedItems[dateKey].length === 1 ? 'item' : 'items'}

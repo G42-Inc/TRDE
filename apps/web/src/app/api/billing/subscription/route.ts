@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/clerk';
+import { getClerkUserId } from '@/lib/auth/clerk';
 import { checkUserAccess } from '@/lib/auth/entitlements.server';
+import { getStripeCustomerId } from '@/lib/stripe/customer';
 
 /**
  * GET /api/billing/subscription
@@ -15,19 +16,9 @@ import { checkUserAccess } from '@/lib/auth/entitlements.server';
  */
 export async function GET(request: NextRequest) {
   try {
-    // Get authenticated user - prioritize header from middleware to avoid auth() detection issues
-    let userId: string | null = request.headers.get('x-clerk-user-id');
-    
-    // Fallback to requireAuth if header not available
+    const userId = await getClerkUserId();
     if (!userId) {
-      try {
-        userId = await requireAuth();
-      } catch (error: any) {
-        return NextResponse.json(
-          { error: 'Unauthorized: Authentication required' },
-          { status: 401 }
-        );
-      }
+      return NextResponse.json({ error: 'Unauthorized: Authentication required' }, { status: 401 });
     }
     
     const accessCheck = await checkUserAccess(userId, 'basic');
@@ -38,6 +29,7 @@ export async function GET(request: NextRequest) {
         status: 'canceled',
         periodEnd: null,
         hasSubscription: false,
+        canManageBilling: false,
       });
     }
 
@@ -46,6 +38,7 @@ export async function GET(request: NextRequest) {
       status: accessCheck.entitlement.status,
       periodEnd: accessCheck.entitlement.current_period_end,
       hasSubscription: true,
+      canManageBilling: !['comped', 'demo'].includes(accessCheck.entitlement.status) && Boolean(await getStripeCustomerId(userId)),
     });
   } catch (error: any) {
     console.error('Error fetching subscription:', error);

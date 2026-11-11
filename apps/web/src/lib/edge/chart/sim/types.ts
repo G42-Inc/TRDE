@@ -24,6 +24,7 @@ export interface SimFill {
 }
 
 export interface SimPosition {
+  entryFeesUsd?: number; // Unallocated opening commissions; optional for older saved sessions.
   qty: number; // Positive = long, negative = short, 0 = flat
   avgPrice: number | null; // Average entry price
   entryTimeUtc: string | null; // Entry time for the current position (for tracking when position was opened)

@@ -1,3 +1,4 @@
+import { readEdgeJson, writeEdgeStorage, getEdgeAccountScope, type EdgeAccountScope } from './accountScope';
 // Chart preferences store
 
 import type { ChartPreferences, ChartThemePreset } from '../types';
@@ -8,29 +9,18 @@ const STORAGE_KEY = 'edge:chartPreferences';
 /**
  * Save chart preferences
  */
-export function saveChartPreferences(prefs: ChartPreferences): void {
+export function saveChartPreferences(prefs: ChartPreferences, scope: EdgeAccountScope | null = getEdgeAccountScope()): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+  writeEdgeStorage(STORAGE_KEY, JSON.stringify(prefs), scope);
 }
 
 /**
  * Get chart preferences
  */
-export function getChartPreferences(): ChartPreferences {
+export function getChartPreferences(scope: EdgeAccountScope | null = getEdgeAccountScope()): ChartPreferences {
   if (typeof window === 'undefined') return DEFAULT_CHART_PREFERENCES;
-  const data = localStorage.getItem(STORAGE_KEY);
-  if (!data) return DEFAULT_CHART_PREFERENCES;
-  
-  try {
-    const parsed = JSON.parse(data);
-    // Migrate old format if needed
-    if (!parsed.preset) {
-      return DEFAULT_CHART_PREFERENCES;
-    }
-    return parsed;
-  } catch {
-    return DEFAULT_CHART_PREFERENCES;
-  }
+  const parsed = readEdgeJson(STORAGE_KEY, DEFAULT_CHART_PREFERENCES, scope);
+  return parsed.preset ? parsed : DEFAULT_CHART_PREFERENCES;
 }
 
 /**

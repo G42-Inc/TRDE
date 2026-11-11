@@ -1,3 +1,4 @@
+import { getClerkUserId } from '@/lib/auth/clerk';
 /**
  * Admin Logout API
  * 
@@ -9,8 +10,8 @@ import { removeAdminAccess } from '@/lib/auth/admin.server';
 
 export async function POST(request: NextRequest) {
   try {
-    // Get userId from headers (set by middleware) - DO NOT use currentUser() in API routes
-    const userId = request.headers.get('x-clerk-user-id');
+
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(

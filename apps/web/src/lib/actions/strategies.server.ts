@@ -1,8 +1,7 @@
 'use server';
 
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
-import { auth, currentUser } from '@clerk/nextjs/server';
-import { headers, cookies } from 'next/headers';
+import { requireAuth } from '@/lib/auth/clerk';
 
 // Public-safe strategy card type (matches view)
 export interface PublicStrategyCard {
@@ -63,76 +62,18 @@ export interface PopularCreator {
 }
 
 async function getCurrentUserId(): Promise<string> {
-  try {
-    // Method 1: Try headers first (set by middleware) - most reliable for server actions
-    const headersList = await headers();
-    const headerUserId = headersList.get('x-clerk-user-id');
-    if (headerUserId) {
-      return headerUserId;
-    }
-  } catch (error) {
-    // Headers() might not be available in all contexts
-    console.warn('headers() failed in server action:', error);
-  }
-  
-  try {
-    // Method 2: Try auth() (preferred method for server actions)
-    const { userId } = await auth();
-    if (userId) {
-      return userId;
-    }
-  } catch (error) {
-    // If auth() fails, try alternative methods
-    console.warn('auth() failed in server action, trying alternatives:', error);
-  }
-  
-  try {
-    // Method 3: Try currentUser() as fallback
-    const user = await currentUser();
-    if (user?.id) {
-      return user.id;
-    }
-  } catch (error) {
-    console.warn('currentUser() failed:', error);
-  }
-  
-  try {
-    // Method 4: Extract from Clerk session cookie (last resort)
-    const cookieStore = await cookies();
-    const sessionToken = cookieStore.get('__session');
-    
-    if (sessionToken?.value) {
-      try {
-        // Clerk's session token is a JWT - decode it to get userId
-        const parts = sessionToken.value.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-          const userId = payload.sub || payload.user_id;
-          if (userId) {
-            return userId;
-          }
-        }
-      } catch (parseError) {
-        // JWT parsing failed
-        console.warn('Failed to parse session token:', parseError);
-      }
-    }
-  } catch (error) {
-    console.warn('Cookie extraction failed:', error);
-  }
-  
-  // If all methods fail, throw error
-  throw new Error('Unauthorized: Could not get user ID from Clerk');
+  return requireAuth();
 }
 
 async function ensurePublicProfile(userId: string, username?: string): Promise<void> {
   const supabase = getSupabaseServiceClient();
-  const defaultUsername = username || `user_${userId.substring(0, 8)}`;
-  await supabase.from('public_profiles').upsert({
+  const defaultUsername = username || `user_${userId.replace(/^user_/, '')}`;
+  const { error } = await supabase.from('public_profiles').upsert({
     user_id: userId,
     username: defaultUsername,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'user_id' });
+  if (error) throw new Error('Could not prepare your public profile. Please try again.');
 }
 
 export async function createStrategy(data: {
@@ -237,7 +178,9 @@ export async function searchPublicStrategies(params: {
     let query = supabase.from('public_strategy_cards').select('*');
     if (params.query) {
       const searchTerm = params.query.toLowerCase();
-      query = query.or(`title.ilike.%${searchTerm}%,summary.ilike.%${searchTerm}%`);
+      // Quote reserved PostgREST punctuation; the client handles URL encoding.
+      const pattern = JSON.stringify(`%${searchTerm}%`);
+      query = query.or(`title.ilike.${pattern},summary.ilike.${pattern}`);
     }
     if (params.tags && params.tags.length > 0) {
       query = query.contains('tags', params.tags);
@@ -263,6 +206,9 @@ export async function voteOnStrategy(strategyId: string, value: 1 | -1): Promise
   try {
     const userId = await getCurrentUserId();
     const supabase = getSupabaseServiceClient();
+    if (value !== 1 && value !== -1) return { success: false, error: 'Invalid vote' };
+    const { data: visibleStrategy } = await supabase.from('strategies').select('id').eq('id', strategyId).eq('is_public', true).maybeSingle();
+    if (!visibleStrategy) return { success: false, error: 'Strategy not found' };
     const { data: existingVote } = await supabase.from('strategy_votes').select('value').eq('strategy_id', strategyId).eq('user_id', userId).single();
     let userVote: 1 | -1 | null = null;
     if (existingVote && existingVote.value === value) {
@@ -299,13 +245,14 @@ export async function getUserVote(strategyId: string): Promise<{ success: boolea
  */
 export async function updateStrategyStatistics(strategyId: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const userId = await getCurrentUserId();
     const supabase = getSupabaseServiceClient();
     
     // Get the strategy to find author
     const { data: strategy } = await supabase
       .from('strategies')
       .select('author_id')
-      .eq('id', strategyId)
+      .eq('id', strategyId).eq('author_id', userId)
       .single();
     
     if (!strategy) {
@@ -332,7 +279,7 @@ export async function updateStrategyStatistics(strategyId: string): Promise<{ su
           profit_factor: 0,
           stats_updated_at: new Date().toISOString(),
         })
-        .eq('id', strategyId);
+        .eq('id', strategyId).eq('author_id', userId);
       return { success: true };
     }
     
@@ -364,7 +311,7 @@ export async function updateStrategyStatistics(strategyId: string): Promise<{ su
         profit_factor: profitFactor,
         stats_updated_at: new Date().toISOString(),
       })
-      .eq('id', strategyId);
+      .eq('id', strategyId).eq('author_id', userId);
     
     if (error) {
       console.error('Error updating strategy statistics:', error);

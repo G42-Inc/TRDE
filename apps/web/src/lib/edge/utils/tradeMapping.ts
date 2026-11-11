@@ -1,3 +1,7 @@
+import { getEdgeAccountScope, isCurrentEdgeAccount, writeEdgeStorage, type EdgeAccountScope } from '../store/accountScope';
+import { getTrades as getEdgeTrades } from '../store/edgeStore';
+import * as cloudStorage from '@/lib/storage.db';
+import type { Trade } from '@trde/core';
 // Map EDGE RoundTripTrade to TRDE Trade form data
 
 import type { RoundTripTrade } from '../types';
@@ -138,7 +142,7 @@ export function edgeTradeToTrdeFormData(trade: RoundTripTrade): {
  */
 export function storeTradeForImport(formData: ReturnType<typeof edgeTradeToTrdeFormData>): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem('trde:importTrade', JSON.stringify({
+  writeEdgeStorage('edge:importTrade', JSON.stringify({
     ...formData,
     importedAt: new Date().toISOString(),
   }));
@@ -147,8 +151,7 @@ export function storeTradeForImport(formData: ReturnType<typeof edgeTradeToTrdeF
 /**
  * Convert EDGE RoundTripTrade to full TRDE Trade object
  */
-export function edgeTradeToTrdeTrade(edgeTrade: RoundTripTrade): any {
-  const { getTrades } = require('@/lib/storage');
+export function edgeTradeToTrdeTrade(edgeTrade: RoundTripTrade, allTrades: Trade[] = []): any {
   const { AssetClass, Grade, Session, MarketRegime, MarketHoursTag, RthEth } = require('@trde/core');
   const { calculateDisciplineFlags } = require('@/lib/discipline-flags');
   
@@ -157,7 +160,6 @@ export function edgeTradeToTrdeTrade(edgeTrade: RoundTripTrade): any {
   const now = Date.now();
   
   const formData = edgeTradeToTrdeFormData(edgeTrade);
-  const allTrades = getTrades();
   const riskRules = null; // Can be enhanced later to load risk rules
   
   // Calculate R (risk/reward) using estimated risk based on instrument
@@ -215,22 +217,19 @@ export function edgeTradeToTrdeTrade(edgeTrade: RoundTripTrade): any {
 /**
  * Import all EDGE trades to TRDE journal with duplicate detection
  * Returns: { imported: number, skipped: number, duplicates: number }
- * @param saveTradesFn Optional function to save trades (from StorageContext). If not provided, uses localStorage.
+ * Uses the authenticated cloud journal and an account-bound save callback.
  */
 export async function importAllEdgeTradesToJournal(
-  saveTradesFn?: (trades: any[]) => Promise<any> | any
+  saveTradesFn: (trades: any[]) => Promise<any> | any,
+  scope: EdgeAccountScope | null = getEdgeAccountScope()
 ): Promise<{ imported: number; skipped: number; duplicates: number }> {
   if (typeof window === 'undefined') return { imported: 0, skipped: 0, duplicates: 0 };
   
-  const { getTrades: getEdgeTrades } = require('@/lib/edge/store/edgeStore');
-  const { getTrades: getTrdeTrades, saveTrades: localStorageSaveTrades } = require('@/lib/storage');
-  
-  const edgeTrades = getEdgeTrades();
-  const existingTrades = getTrdeTrades();
-  
-  // Use provided saveTrades function or fallback to localStorage
-  const saveTrades = saveTradesFn || localStorageSaveTrades;
-  
+  if (!isCurrentEdgeAccount(scope)) throw new Error('Sign in again before importing trades.');
+  const edgeTrades = getEdgeTrades(scope);
+  const existingTrades = await cloudStorage.getTrades();
+  if (!isCurrentEdgeAccount(scope)) throw new Error('Account changed. Import canceled.');
+
   // Create a Set of existing trade IDs and notes signatures to detect duplicates
   const existingIds = new Set(existingTrades.map((t: any) => t.id));
   const existingSignatures = new Set(
@@ -262,7 +261,7 @@ export async function importAllEdgeTradesToJournal(
     }
     
     try {
-      const trade = edgeTradeToTrdeTrade(edgeTrade);
+      const trade = edgeTradeToTrdeTrade(edgeTrade, existingTrades);
       newTrades.push(trade);
       existingIds.add(tradeId); // Prevent duplicates within this batch
     } catch (error) {
@@ -273,7 +272,8 @@ export async function importAllEdgeTradesToJournal(
   
   if (newTrades.length > 0) {
     const allTrades = [...existingTrades, ...newTrades];
-    await saveTrades(allTrades);
+    if (!isCurrentEdgeAccount(scope)) throw new Error('Account changed. Import canceled.');
+    await saveTradesFn(allTrades);
     console.log('[TradeMapping] Imported trades synced to cloud');
   }
   

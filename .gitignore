@@ -12,6 +12,10 @@ node_modules/
 
 # Generated builds and caches
 .next/
+.open-next/
+.wrangler/
+.dev.vars
+.dev.vars.*
 dist/
 build/
 .expo/

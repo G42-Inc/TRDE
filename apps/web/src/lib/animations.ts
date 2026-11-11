@@ -42,7 +42,7 @@ export const slideInRight = {
 };
 
 // Page transition variants
-export const pageTransition = {
+export const pageTransition: import('framer-motion').Variants = {
   initial: { opacity: 0, y: 8 },
   animate: { 
     opacity: 1, 

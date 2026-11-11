@@ -58,14 +58,7 @@ export default function Dashboard() {
   // This useEffect is removed to avoid duplicate checks and potential race conditions
 
   useEffect(() => {
-    // Add a small delay to ensure skeleton loader is visible
-    const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
-    
-    return () => {
-      clearTimeout(timer);
-    };
+    setMounted(true);
   }, []);
 
   // Use empty array during SSR to prevent hydration mismatch
@@ -102,7 +95,7 @@ export default function Dashboard() {
   })() : [];
 
   // Build equity curve data
-  const equityData = filteredTrades
+  const equityData = [...filteredTrades]
     .sort((a, b) => a.createdAt - b.createdAt)
     .reduce((acc, trade, index) => {
       const prevValue = acc.length > 0 ? acc[acc.length - 1].value : 0;
@@ -169,7 +162,7 @@ export default function Dashboard() {
     }
   };
 
-  if (!mounted) {
+  if (!mounted || storageLoading) {
     return (
       <div className="space-y-6">
         <SkeletonLoader width="200px" height="2rem" />
@@ -362,13 +355,13 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {trades
+              {[...trades]
                 .sort((a, b) => b.createdAt - a.createdAt)
                 .slice(0, 5)
                 .map((trade, index) => (
                 <tr key={trade.id} className="table-row-premium border-b animate-slide-in-up" style={{ animationDelay: `${index * 30}ms`, borderColor: 'var(--theme-border)' }}>
                   <td className="theme-text text-body-sm font-medium">
-                    {format(parseISO(trade.tradeDate), 'M/dd HH:mm')}
+                    {format(new Date(trade.entryTime), 'M/dd HH:mm')}
                   </td>
                   <td className="theme-text text-body font-semibold">
                     {trade.assetClass === AssetClass.FUTURES
@@ -403,6 +396,7 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+      <section id="todos" className="scroll-mt-24"><TodoList /></section>
     </div>
   );
 }

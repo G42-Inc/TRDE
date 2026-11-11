@@ -7,6 +7,7 @@
  * Endpoint: POST /api/webhooks/retry
  */
 
+import { hasRetryAuthorization } from '@/lib/auth/policy';
 import { NextRequest, NextResponse } from 'next/server';
 import { getPendingWebhooks, markWebhookProcessing, markWebhookSucceeded, markWebhookFailed, incrementRetryCount } from '@/lib/webhooks/retry-queue';
 import { handleStripeWebhookRetry } from '@/lib/webhooks/stripe-retry';
@@ -15,24 +16,14 @@ import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
 
 export const dynamic = 'force-dynamic';
 
-// Optional: Add API key protection for cron jobs
-const RETRY_API_KEY = process.env.WEBHOOK_RETRY_API_KEY;
-
 /**
  * POST /api/webhooks/retry
  * 
  * Processes pending webhook retries
  */
 export async function POST(request: NextRequest) {
-  // Optional: Verify API key for cron job security
-  if (RETRY_API_KEY) {
-    const apiKey = request.headers.get('x-api-key');
-    if (apiKey !== RETRY_API_KEY) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
-    }
+  if (!hasRetryAuthorization(process.env.WEBHOOK_RETRY_API_KEY, request.headers.get('x-api-key'))) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {

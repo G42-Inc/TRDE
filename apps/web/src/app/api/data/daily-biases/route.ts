@@ -1,3 +1,5 @@
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
+import { dailyBiasFromRow } from '@/lib/journal/records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -9,8 +11,7 @@ import type { DailyBias } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -35,15 +36,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const biases: DailyBias[] = (data || []).map((row: any) => ({
-      date: row.date,
-      bias: row.bias,
-      reason: row.reason || '',
-      confidence: row.confidence || 50,
-      confirmed: row.confirmed,
-      confirmationNotes: row.confirmation_notes,
-      confirmedAt: row.confirmed_at,
-    }));
+    const biases = (data || []).map(dailyBiasFromRow);
 
     // Use 'daily-biases' key to match endpoint name for mobile client
     return NextResponse.json({ 'daily-biases': biases, biases });
@@ -63,8 +56,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -72,6 +64,10 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const demo = await checkDemoStatus(userId);
+    if (demo.error) return NextResponse.json({ error: 'Could not verify journal access. Please retry.' }, { status: 503 });
+    if (demo.isDemo) return createDemoBlockedResponse('saving journal data');
 
     const body = await request.json();
     const { biases } = body;
@@ -103,16 +99,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, count: 0, deleted: true });
     }
 
-    const dbBiases = biases.map((bias: DailyBias) => ({
+    const uniqueBiases = [...new Map(biases.map((bias: DailyBias) => [bias.date, bias])).values()];
+    const dbBiases = uniqueBiases.map((bias: DailyBias) => ({
       id: `bias-${userId}-${bias.date}`,
       user_id: userId,
       date: bias.date,
       bias: bias.bias,
       reason: bias.reason || '',
-      confidence: bias.confidence || 50,
-      confirmed: bias.confirmed,
+      confidence: bias.confidence ?? 50,
+      confirmed: bias.confirmed ?? null,
       confirmation_notes: bias.confirmationNotes || null,
-      confirmed_at: bias.confirmedAt || null,
+      confirmed_at: bias.confirmedAt ?? null,
       created_at: Date.now(),
       updated_at: Date.now(),
       metadata: {},

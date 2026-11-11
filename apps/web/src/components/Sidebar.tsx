@@ -10,6 +10,8 @@ import {
   FolderIcon,
   BookOpenIcon,
   ChartBarIcon,
+  PresentationChartLineIcon,
+  ChartPieIcon,
   CalendarIcon,
   ShieldCheckIcon,
   Cog6ToothIcon,
@@ -27,6 +29,8 @@ const navItems = [
   { href: '/app', label: 'Overview', icon: HomeIcon, description: 'Dashboard & metrics' },
   { href: '/trades/timeline', label: 'Trade Hub', icon: FolderIcon, description: 'Timeline & history' },
   { href: '/performance', label: 'Performance', icon: ChartBarIcon, description: 'Analytics & strategies' },
+  { href: '/analytics', label: 'Analytics', icon: ChartPieIcon, description: 'Detailed breakdowns' },
+  { href: '/strategies', label: 'Strategies', icon: PresentationChartLineIcon, description: 'Setups & playbooks' },
   { href: '/edge', label: 'EDGE', icon: BoltIcon, description: 'Backtesting & simulation' },
   { href: '/flow', label: 'Flow', icon: SignalIcon, description: 'Coming Soon', disabled: true },
   { href: '/settings', label: 'Settings', icon: Cog6ToothIcon, description: 'Account & preferences' },
@@ -89,7 +93,7 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
   if (collapsed) {
     return (
       <aside
-        className="h-screen flex flex-col items-center overflow-hidden glass-surface-strong sidebar-transition"
+        className="h-full min-h-0 flex flex-col items-center overflow-hidden glass-surface-strong sidebar-transition"
         style={{
           width: 68,
           borderRadius: 0,
@@ -103,7 +107,6 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
             onClick={onToggleCollapse}
             aria-label="Expand sidebar"
             className="sidebar-glass-toggle group"
-            aria-label="Expand sidebar"
           >
             <ChevronRightIcon className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5" style={{ color: 'var(--glass-text, var(--theme-text))' }} />
           </button>
@@ -114,21 +117,23 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
           <Link href="/app" className="block">
             {darkLightTheme === 'dark' ? (
               <Image
-                src="/logos/TRDE_wordmark_white_transparent_300w.png"
+                src="/logos/TRDE_white_transparent_128x128.png"
                 alt="TRDE"
                 width={36}
                 height={36}
-                className="h-7 w-auto opacity-80"
+                className="h-8 w-8 object-contain opacity-90"
                 priority
+                unoptimized
               />
             ) : (
               <Image
-                src="/logos/TRDE_wordmark_black_transparent_300w.png"
+                src="/logos/TRDE_black_transparent_128x128.png"
                 alt="TRDE"
                 width={36}
                 height={36}
-                className="h-7 w-auto opacity-80"
+                className="h-8 w-8 object-contain opacity-90"
                 priority
+                unoptimized
               />
             )}
           </Link>
@@ -138,6 +143,7 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
         <div className="flex-shrink-0 pb-4">
           <Link
             href="/trades/new"
+            aria-label="New trade"
             className="flex items-center justify-center w-10 h-10 transition-all duration-200 hover:scale-110 active:scale-95"
             style={{
               background: 'var(--glass-bg, linear-gradient(135deg, var(--theme-primary) 0%, var(--theme-accent) 100%))',
@@ -154,9 +160,9 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
         </div>
 
         {/* Primary nav — icons only */}
-        <nav className="flex-1 w-full flex flex-col items-center py-2 gap-1.5 overflow-y-auto">
+        <nav aria-label="Workspace" className="min-h-0 flex-1 w-full flex flex-col items-center py-2 gap-1.5 overflow-y-auto">
           {navItems.map((item) => {
-            const isActive = pathname.startsWith(item.href) || pathname === item.href;
+            const isActive = item.href === '/trades/timeline' ? pathname.startsWith('/trades') : pathname === item.href || pathname.startsWith(item.href + '/');
             const isEdge = item.href === '/edge';
             const hasNotification = isEdge && unviewedEdgeTradeCount > 0;
             const isDisabled = 'disabled' in item && item.disabled;
@@ -194,6 +200,9 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
               <div key={item.href} className="relative">
                 <Link
                   href={item.href}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={isActive ? 'page' : undefined}
                   className={clsx(
                     'relative flex items-center justify-center w-10 h-10 transition-all duration-200 hover:scale-110 active:scale-95',
                     isActive
@@ -247,6 +256,9 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
               <div key={item.href} className="relative">
                 <Link
                   href={item.href}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={isActive ? 'page' : undefined}
                   className={clsx(
                     'relative flex items-center justify-center w-10 h-10 transition-all duration-200 hover:scale-110 active:scale-95',
                     isActive
@@ -300,7 +312,7 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
   // EXPANDED STATE — full sidebar
   // ═══════════════════════════════════════════════════════════════════
   return (
-    <aside className="w-64 h-screen flex flex-col overflow-hidden glass-surface-strong sidebar-transition" style={{ borderRadius: 0, border: 'none', borderRight: '1px solid var(--glass-border, var(--theme-border))' }}>
+    <aside className="w-64 h-full min-h-0 flex flex-col overflow-hidden glass-surface-strong sidebar-transition" style={{ borderRadius: 0, border: 'none', borderRight: '1px solid var(--glass-border, var(--theme-border))' }}>
       {/* ═══════════════════════════════════════════════════════════════════
           FIXED HEADER: Logo, Tagline, New Trade Button
           ═══════════════════════════════════════════════════════════════════ */}
@@ -323,24 +335,26 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
             <div className="flex justify-center mb-4">
               {darkLightTheme === 'dark' ? (
                 <Image
-                  src="/logos/TRDE_wordmark_white_transparent_300w.png"
+                  src="/logos/trde-wordmark-white-256.webp"
                   alt="TRDE"
                   width={140}
                   height={40}
-                  className="h-12 w-auto transition-all duration-300 group-hover:scale-105"
+                  className="h-auto w-32 transition-all duration-300 group-hover:scale-105"
                   priority
+                  unoptimized
                   style={{ 
                     filter: 'drop-shadow(0 4px 12px rgba(201, 169, 98, 0.2))',
                   }}
                 />
               ) : (
                 <Image
-                  src="/logos/TRDE_wordmark_black_transparent_300w.png"
+                  src="/logos/trde-wordmark-black-256.webp"
                   alt="TRDE"
                   width={140}
                   height={40}
-                  className="h-12 w-auto transition-all duration-300 group-hover:scale-105"
+                  className="h-auto w-32 transition-all duration-300 group-hover:scale-105"
                   priority
+                  unoptimized
                   style={{ 
                     filter: 'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.1))',
                   }}
@@ -364,6 +378,7 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
         <div className="px-5 pb-6">
           <Link
             href="/trades/new"
+            aria-label="New trade"
             className="group relative w-full flex items-center justify-center gap-2.5 overflow-hidden transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
             style={{
               padding: '14px 20px',
@@ -394,10 +409,10 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
       {/* ═══════════════════════════════════════════════════════════════════
           PRIMARY NAVIGATION
           ═══════════════════════════════════════════════════════════════════ */}
-      <nav className="flex-1 px-4 py-4">
+      <nav aria-label="Workspace" className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-2">
           {navItems.map((item) => {
-            const isActive = pathname.startsWith(item.href) || pathname === item.href;
+            const isActive = item.href === '/trades/timeline' ? pathname.startsWith('/trades') : pathname === item.href || pathname.startsWith(item.href + '/');
             const isEdge = item.href === '/edge';
             const hasNotification = isEdge && unviewedEdgeTradeCount > 0;
             const isDisabled = 'disabled' in item && item.disabled;
@@ -431,6 +446,8 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
               <Link
                 key={item.href}
                 href={item.href}
+                aria-label={item.label}
+                aria-current={isActive ? 'page' : undefined}
                 className={clsx(
                   'flex items-center gap-4 px-4 py-3.5 transition-all duration-200',
                   isActive
@@ -484,6 +501,9 @@ export const Sidebar = React.memo(function Sidebar({ collapsed = false, onToggle
               <div key={item.href} className="relative">
                 <Link
                   href={item.href}
+                  aria-label={item.label}
+                  title={item.label}
+                  aria-current={isActive ? 'page' : undefined}
                   className={clsx(
                     'relative flex items-center justify-center w-10 h-10 transition-all duration-200',
                     isActive

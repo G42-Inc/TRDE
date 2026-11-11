@@ -52,7 +52,6 @@ const glass = {
     WebkitBackdropFilter: 'blur(40px) saturate(180%)',
     border: '1px solid rgba(200,162,74,0.15)',
     boxShadow: '0 4px 20px rgba(0,0,0,0.04), inset 0 1.5px 0 rgba(255,255,255,0.55), inset 0 -1px 0 rgba(0,0,0,0.03)',
-    borderRadius: 9999,
     borderRadius: 14,
     color: '#374151',
   } as React.CSSProperties,
@@ -124,7 +123,7 @@ const itemVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { type: 'spring', stiffness: 300, damping: 30 },
+    transition: { type: 'spring' as const, stiffness: 300, damping: 30 },
   },
 };
 
@@ -174,7 +173,7 @@ export function AssetsStep({ selected, onToggle, onNext, onBack }: AssetsStepPro
                   style={{ background: '#C9A962' }}
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  transition={{ type: 'spring' as const, stiffness: 500, damping: 30 }}
                 >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={3}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />

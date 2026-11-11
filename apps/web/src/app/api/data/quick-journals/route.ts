@@ -1,3 +1,5 @@
+import { checkDemoStatus, createDemoBlockedResponse } from '@/lib/demo/guards';
+import { saveOwnedRecords, RecordConflictError, InvalidRecordError } from '@/lib/db/owned-records';
 import { NextRequest, NextResponse } from 'next/server';
 import { getClerkUserId } from '@/lib/auth/clerk';
 import { getSupabaseServiceClient } from '@/lib/db/supabase.server';
@@ -9,8 +11,7 @@ import type { DailyQuickJournal } from '@trde/core';
  */
 export async function GET(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
     const journals: DailyQuickJournal[] = (data || []).map((row: any) => ({
       timestamp: row.timestamp,
       moodLabel: row.mood_label,
-      moodIntensity: row.mood_intensity || 3,
+      moodIntensity: row.mood_intensity ?? 3,
       shortNote: row.short_note || '',
       stressLevel: row.stress_level,
       sleepQuality: row.sleep_quality,
@@ -62,8 +63,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const headerUserId = request.headers.get('x-clerk-user-id');
-    const userId = headerUserId || await getClerkUserId();
+    const userId = await getClerkUserId();
     
     if (!userId) {
       return NextResponse.json(
@@ -71,6 +71,10 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    const demo = await checkDemoStatus(userId);
+    if (demo.error) return NextResponse.json({ error: 'Could not verify journal access. Please retry.' }, { status: 503 });
+    if (demo.isDemo) return createDemoBlockedResponse('saving journal data');
 
     const body = await request.json();
     const { journals } = body;
@@ -107,31 +111,22 @@ export async function POST(request: NextRequest) {
       user_id: userId,
       timestamp: journal.timestamp,
       mood_label: journal.moodLabel,
-      mood_intensity: journal.moodIntensity || 3,
+      mood_intensity: journal.moodIntensity ?? 3,
       short_note: journal.shortNote || '',
-      stress_level: journal.stressLevel || null,
-      sleep_quality: journal.sleepQuality || null,
+      stress_level: journal.stressLevel ?? null,
+      sleep_quality: journal.sleepQuality ?? null,
       created_at: journal.timestamp,
       updated_at: journal.timestamp,
       metadata: {},
     }));
 
-    const { error } = await supabase
-      .from('quick_journals')
-      .upsert(dbJournals, {
-        onConflict: 'id',
-      });
-
-    if (error) {
-      console.error('Error saving quick journals:', error);
-      return NextResponse.json(
-        { error: 'Failed to save quick journals' },
-        { status: 500 }
-      );
-    }
+    await saveOwnedRecords(supabase, 'quick_journals', userId, dbJournals);
 
     return NextResponse.json({ success: true, count: journals.length });
   } catch (error: any) {
+    if (error instanceof RecordConflictError || error instanceof InvalidRecordError) {
+      return NextResponse.json({ error: error.message }, { status: error instanceof RecordConflictError ? 409 : 400 });
+    }
     console.error('Error in POST /api/data/quick-journals:', error);
     return NextResponse.json(
       { error: error.message || 'Internal server error' },

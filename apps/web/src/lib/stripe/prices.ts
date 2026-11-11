@@ -22,9 +22,9 @@ import type { PlanTier } from '@/lib/entitlements/types';
  * 5. Set as environment variables
  */
 export const PLAN_PRICE_IDS: Record<PlanTier, string> = {
-  basic: process.env.STRIPE_PRICE_ID_BASIC || '',
-  edge: process.env.STRIPE_PRICE_ID_EDGE || '',
-  pro: process.env.STRIPE_PRICE_ID_PRO || '',
+  get basic() { return process.env.STRIPE_PRICE_ID_BASIC || ''; },
+  get edge() { return process.env.STRIPE_PRICE_ID_EDGE || ''; },
+  get pro() { return process.env.STRIPE_PRICE_ID_PRO || ''; },
 };
 
 /**
@@ -80,20 +80,14 @@ export function getPriceId(plan: PlanTier): string | null {
   return priceId;
 }
 
-// Reverse lookup map for O(1) lookup performance
-// Built at module load time
-const PRICE_ID_TO_PLAN: Map<string, PlanTier> = new Map(
-  Object.entries(PLAN_PRICE_IDS).map(([plan, priceId]) => [priceId, plan as PlanTier])
-);
-
 /**
  * Get plan tier from price ID (reverse lookup)
  * 
- * Uses O(1) lookup via pre-built map for efficiency.
+ * Resolve runtime price configuration after Worker secrets are initialized.
  * 
  * @param priceId - Stripe price ID
  * @returns Plan tier or null if not found
  */
 export function getPlanFromPriceId(priceId: string): PlanTier | null {
-  return PRICE_ID_TO_PLAN.get(priceId) || null;
+  return (Object.entries(PLAN_PRICE_IDS).find(([, configured]) => configured && configured === priceId)?.[0] as PlanTier | undefined) ?? null;
 }

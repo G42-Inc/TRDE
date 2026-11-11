@@ -40,7 +40,8 @@ export async function handleUserCreated(
     displayName = user.username;
   }
 
-  // Create profile in Supabase
+  // Initialize missing records only. Replayed/out-of-order creation events must
+  // not replace a newer profile, paid entitlement, earned XP or user preferences.
   const { error } = await supabase
     .from('profiles')
     .upsert({
@@ -53,6 +54,7 @@ export async function handleUserCreated(
       updated_at: new Date().toISOString(),
     }, {
       onConflict: 'user_id',
+      ignoreDuplicates: true,
     });
 
   if (error) {
@@ -64,7 +66,7 @@ export async function handleUserCreated(
 
   // Auto-create demo entitlement for new users
   // This gives them immediate view-only access to explore the app
-  const { error: entitlementError, data: entitlementData } = await supabase
+  const { error: entitlementError } = await supabase
     .from('entitlements')
     .upsert({
       user_id: userId,
@@ -77,8 +79,8 @@ export async function handleUserCreated(
       updated_at: new Date().toISOString(),
     }, {
       onConflict: 'user_id',
-    })
-    .select();
+      ignoreDuplicates: true,
+    });
 
   if (entitlementError) {
     // CRITICAL: Most common cause is database constraint not including 'demo' status
@@ -90,7 +92,7 @@ export async function handleUserCreated(
     console.error('  ALTER TABLE entitlements ADD CONSTRAINT entitlements_status_check CHECK (status IN (\'active\', \'past_due\', \'canceled\', \'comped\', \'demo\'));');
     // Don't throw - profile was created successfully, entitlement is secondary
   } else {
-    console.log(`Demo entitlement created for user ${userId}:`, entitlementData);
+    console.log('Demo entitlement initialization completed');
   }
 
   // Initialize engagement stats for new user
@@ -110,6 +112,7 @@ export async function handleUserCreated(
       updated_at: new Date().toISOString(),
     }, {
       onConflict: 'user_id',
+      ignoreDuplicates: true,
     });
 
   if (statsError) {
@@ -132,6 +135,7 @@ export async function handleUserCreated(
       updated_at: new Date().toISOString(),
     }, {
       onConflict: 'user_id',
+      ignoreDuplicates: true,
     });
 
   if (notifError) {
